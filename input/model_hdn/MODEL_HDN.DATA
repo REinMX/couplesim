@@ -1,12 +1,11 @@
 -- ============================================================================
 -- MODEL_HDN.DATA -- ILLUSTRATIVE deck for the coupled-simulation example.
 --
--- Role: coupled slave (like model_n). Subsea wells H-P1/H-P2, whose
--- production profiles are NOT specified here: they are written by
--- master_network at every coupling iteration as GSATPROD tables (see
--- INCLUDE below). The static table that was used "as today" is kept at
--- input/static_profiles/gsatprod_model_hdn.inc -- switch model_hdn back to
--- mode=static in coupling.json if you want the old behaviour for one model.
+-- Role: coupled slave (like model_n). Subsea wells H-P1/H-P2 report
+-- simulated rates to master_network. The master combines those rates with
+-- prescribed external profiles and model_n results, solves the shared
+-- network, and returns pressure constraints through driver-level exchange
+-- files.
 --
 -- !!! This deck is NOT executed by the example (no Eclipse licence needed).
 --     The dummy simulator (bin/eclipse_dummy.py) reads simspec.json next
@@ -15,7 +14,7 @@
 -- ============================================================================
 RUNSPEC
 TITLE
-  COUPLED EXAMPLE - MODEL_HDN (STATIC SLAVE, SUBSEA WELLS)
+  COUPLED EXAMPLE - MODEL_HDN (COUPLED SLAVE, SUBSEA WELLS)
 DIMENS
   5 5 3 /
 OIL
@@ -83,15 +82,13 @@ COMPDAT
   'H-P2' 3 4 1 3 'OPEN' 1* 1* 0.3 /
 /
 -- ---------------------------------------------------------------------------
--- Coupling interface: GSATPROD production profiles for the subsea wells.
--- In the coupled setup this file is REWRITTEN by master_network at every
--- coupling iteration (see ert/bin/scripts/run_coupled.py); a real Eclipse
--- run consumes the GSATPROD keyword directly. If your setup uses GSATPTAB
--- instead, keep the same mechanism and just write the table in that
--- keyword's format.
+-- Coupling interface (illustrative): the licence-free driver exchanges
+-- coupling/slave_rates_model_hdn.csv -> master_network and
+-- coupling/network_constraints_model_hdn.csv -> this slave. Those CSV files
+-- are NOT Eclipse keywords. In a real coupled run, map the same rate/pressure
+-- contract to the coupling controls supported by your Eclipse/FMU setup.
+-- Prescribed external GSATPROD profiles belong to the master/network deck.
 -- ---------------------------------------------------------------------------
-INCLUDE
-  'coupling/gsatprod_model_hdn.inc' /
 WCONPROD
   'H-P1' 'OPEN' 'ORAT' 300.0 4* 2500.0 /
   'H-P2' 'OPEN' 'ORAT' 300.0 4* 2500.0 /

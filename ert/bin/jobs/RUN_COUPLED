@@ -1,6 +1,6 @@
 -- ERT forward-model step definition ("job"), installed with INSTALL_JOB.
 -- EXECUTABLE is resolved relative to this file (ert/bin/jobs/), so
--- ../../bin/run_coupled.py is the repository's bin/run_coupled.py.
+-- ../scripts/run_coupled.py resolves to ert/bin/scripts/run_coupled.py.
 -- ERT runs the step with cwd == realization runpath; the driver uses that
 -- to find the GEN_KW result file (q0_mult.txt) and to write the coupling
 -- files, matching the FMU realization-<IENS>/iter-<ITER> layout.

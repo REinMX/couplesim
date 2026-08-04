@@ -1,31 +1,16 @@
 #!/usr/bin/env python3
-"""Dummy Eclipse/Flow stand-in for the coupled multi-model example.
+"""Licence-free stand-in for the master network and two reservoir slaves.
 
-Plays the role of the reservoir simulator (eclipse100 / flow) for the
-three models of the coupled setup:
+The exchange directions are intentionally explicit:
 
-  master_network -- "dummy reservoir with the network model". Reads the
-                    rate demands of the coupled slave wells (from their
-                    simulation results), solves a simple subsea network
-                    (manifold pressure + riser friction + hydrostatics)
-                    and writes GSATPROD production-profile tables for each
-                    coupled slave.
-  model_n        -- coupled slave. Consumes the GSATPROD table written by
-                    master_network, applies a linear inflow-performance
-                    (IPR) constraint and reports back the actual rates.
-  model_hdn      -- coupled slave (same mechanism as model_n). A static
-                    mode (old GSATPROD file, no network feedback) is kept
-                    for any model via mode=static in coupling.json.
+* prescribed GSATPROD rows are immutable inputs to ``master_network``;
+* ``model_n`` and ``model_hdn`` write simulated rates to the network;
+* the network combines all three source categories and returns calculated
+  pressure constraints to each simulated slave.
 
-The dummy does NOT parse the .DATA decks. Each model's machine-readable
-specification lives in simspec.json inside its staging folder; the .DATA
-files sit next to it so the example mirrors what a real run would consume.
-Swap this script for the real simulator (or `flow`) in
-ert/bin/scripts/run_coupled.py and the same GSATPROD include files drive
-the real decks.
-
-Usage:
-  python3 eclipse_dummy.py <model> <model_dir> <iteration>
+The ``.DATA`` decks are documentation scaffolds only. This dummy consumes the
+machine-readable ``simspec.json`` and CSV/JSON exchange artifacts so the
+coupling topology can be exercised without an Eclipse licence.
 """
 
 from __future__ import annotations
@@ -33,194 +18,408 @@ from __future__ import annotations
 import csv
 import json
 import sys
+from datetime import date
 from pathlib import Path
+from typing import Any
 
 GRAVITY = 9.81  # m/s2
 
 
-def log(msg: str) -> None:
-    print(f"[dummy:{sys.argv[1]}] {msg}", flush=True)
+def log(model: str, message: str) -> None:
+    print(f"[dummy:{model}] {message}", flush=True)
 
 
-def load_json(path: Path) -> dict:
-    with open(path, "r", encoding="utf-8") as fh:
-        return json.load(fh)
+def load_json(path: Path) -> dict[str, Any]:
+    with path.open(encoding="utf-8") as handle:
+        return json.load(handle)
 
 
-def write_csv(path: Path, header: list[str], rows: list[list]) -> None:
-    with open(path, "w", newline="", encoding="utf-8") as fh:
-        writer = csv.writer(fh)
+def write_csv(path: Path, header: list[str], rows: list[list[Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
         writer.writerow(header)
         writer.writerows(rows)
 
 
-def read_rates_csv(path: Path) -> dict[str, dict[int, float]]:
-    """slave_rates_<model>.csv -> {well: {year: q_liq}}"""
-    out: dict[str, dict[int, float]] = {}
-    with open(path, newline="", encoding="utf-8") as fh:
-        for row in csv.DictReader(fh):
-            out.setdefault(row["well"], {})[int(row["year"])] = float(row["q_liq_sm3d"])
-    return out
+def read_csv(path: Path) -> list[dict[str, str]]:
+    if not path.exists():
+        raise FileNotFoundError(f"required coupling artifact is missing: {path}")
+    with path.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    if not rows:
+        raise ValueError(f"required coupling artifact is empty: {path}")
+    return rows
 
 
-def parse_gsatprod_inc(path: Path) -> list[dict]:
-    """Parse the GSATPROD include table.
+def schedule_years(coupling: dict[str, Any]) -> list[int]:
+    schedule = coupling["schedule"]
+    if int(schedule.get("steps_per_year", 1)) != 1:
+        raise ValueError("dummy example currently supports exactly one coupling step per year")
+    first_year = date.fromisoformat(schedule["start"]).year
+    years = int(schedule["years"])
+    if years < 1:
+        raise ValueError("schedule.years must be positive")
+    return list(range(first_year, first_year + years))
 
-    Format written by master_network (and used for the static slave):
 
-        GSATPROD
-        --  WELL      YEAR  Q_LIQ_SM3D  Q_GAS_SM3D  P_WH_BAR  P_BHP_BAR  GSAT
-            'N-P1'    2024  207.50      24900       41.90     299.98     0.342 /
-        /
-
-    Comment lines start with --. The keyword line and the closing / are
-    skipped. Tokens may be single- or double-quoted.
-    """
-    rows: list[dict] = []
-    for raw in path.read_text(encoding="utf-8").splitlines():
+def parse_gsatprod_inc(path: Path) -> list[dict[str, Any]]:
+    """Parse the example's illustrative GSATPROD row convention strictly."""
+    rows: list[dict[str, Any]] = []
+    for line_number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         line = raw.strip()
-        if not line or line.startswith("--") or line.startswith("GSATPROD") or line == "/":
+        if not line or line.startswith("--") or line == "GSATPROD" or line == "/":
             continue
-        toks = [t.strip("'\"") for t in line.split()]
-        if len(toks) < 7:
-            continue
+        tokens = [token.strip("'\"") for token in line.split() if token != "/"]
+        if len(tokens) != 7:
+            raise ValueError(f"malformed GSATPROD example row at {path}:{line_number}: {raw}")
+        try:
+            rows.append(
+                {
+                    "well": tokens[0],
+                    "year": int(tokens[1]),
+                    "q_liq_sm3d": float(tokens[2]),
+                    "q_gas_sm3d": float(tokens[3]),
+                    "p_wh_bar": float(tokens[4]),
+                    "p_bhp_bar": float(tokens[5]),
+                    "gsat": float(tokens[6]),
+                }
+            )
+        except ValueError as exc:
+            raise ValueError(f"invalid GSATPROD value at {path}:{line_number}: {raw}") from exc
+    if not rows:
+        raise ValueError(f"no GSATPROD rows found in {path}")
+    return rows
+
+
+def validate_rows(
+    rows: list[dict[str, Any]], expected_wells: set[str], expected_years: set[int], label: str
+) -> None:
+    keys = [(str(row["well"]), int(row["year"])) for row in rows]
+    expected = {(well, year) for well in expected_wells for year in expected_years}
+    actual = set(keys)
+    if len(keys) != len(actual):
+        raise ValueError(f"{label} contains duplicate well/year rows")
+    missing = sorted(expected - actual)
+    extra = sorted(actual - expected)
+    if missing or extra:
+        raise ValueError(f"{label} has incomplete coverage; missing={missing}, extra={extra}")
+    for row in rows:
+        rate = float(row["q_liq_sm3d"])
+        if rate < 0.0:
+            raise ValueError(f"{label} contains a negative liquid rate for {row['well']}/{row['year']}")
+
+
+def validate_prescribed_profile_rows(
+    rows: list[dict[str, Any]], expected_years: set[int], label: str
+) -> None:
+    wells = {str(row["well"]) for row in rows}
+    if not wells:
+        raise ValueError(f"prescribed profile {label} contains no wells")
+    validate_rows(rows, wells, expected_years, f"prescribed profile {label}")
+
+
+def slave_rate_rows(path: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for row in read_csv(path):
         rows.append(
             {
-                "well": toks[0],
-                "year": int(float(toks[1])),
-                "q_liq": float(toks[2]),
-                "q_gas": float(toks[3]),
-                "p_wh": float(toks[4]),
-                "p_bhp": float(toks[5]),
-                "gsat": float(toks[6]),
+                "well": row["well"],
+                "year": int(row["year"]),
+                "q_liq_sm3d": float(row["q_liq_sm3d"]),
+                "q_gas_sm3d": float(row.get("q_gas_sm3d") or 0.0),
+                "origin": row.get("origin", "simulation_output"),
             }
         )
     return rows
 
 
-def run_master(spec: dict, model_dir: Path, coupling: dict) -> None:
-    years = int(coupling["schedule"]["years"])
-    net = spec["network"]
-    initial = coupling.get("initial_rates_sm3d", {})
+def staged_profile_path(model_dir: Path, master_model: str, configured_path: str) -> Path:
+    source = Path(configured_path)
+    prefix = Path("input") / master_model
+    try:
+        relative = source.relative_to(prefix)
+    except ValueError as exc:
+        raise ValueError(
+            f"prescribed profile must live below input/{master_model}/ so it is staged with the master: {source}"
+        ) from exc
+    return model_dir / relative
+
+
+def run_master(
+    spec: dict[str, Any], model_dir: Path, coupling: dict[str, Any], iteration: int
+) -> None:
+    years = schedule_years(coupling)
+    year_set = set(years)
+    network = spec["network"]
     coupling_dir = model_dir.parent / "coupling"
-    coupling_dir.mkdir(parents=True, exist_ok=True)
+    exchange_dir = coupling_dir / "exchange"
+    exchange_dir.mkdir(parents=True, exist_ok=True)
 
-    # group the network wells per slave model
-    by_slave: dict[str, list[dict]] = {}
-    for w in spec["wells"]:
-        by_slave.setdefault(w["slave"], []).append(w)
+    by_slave: dict[str, list[dict[str, Any]]] = {}
+    for well in spec["wells"]:
+        by_slave.setdefault(well["slave"], []).append(well)
+    configured_slaves = set(coupling["slaves"])
+    if set(by_slave) != configured_slaves:
+        raise ValueError(
+            f"master well map does not match configured slaves: master={sorted(by_slave)}, config={sorted(configured_slaves)}"
+        )
 
+    profile_sources: dict[str, dict[str, Any]] = {}
+    prescribed_by_year = {year: 0.0 for year in years}
+    prescribed_wells: set[str] = set()
+    for profile_name, profile_cfg in coupling["prescribed_network_profiles"].items():
+        profile_path = staged_profile_path(model_dir, spec["model"], profile_cfg["path"])
+        profile_rows = parse_gsatprod_inc(profile_path)
+        validate_prescribed_profile_rows(profile_rows, year_set, profile_name)
+        overlap = prescribed_wells & {str(row["well"]) for row in profile_rows}
+        if overlap:
+            raise ValueError(f"duplicate prescribed wells across profiles: {sorted(overlap)}")
+        prescribed_wells.update(str(row["well"]) for row in profile_rows)
+        for row in profile_rows:
+            prescribed_by_year[int(row["year"])] += float(row["q_liq_sm3d"])
+        profile_sources[profile_name] = {
+            "keyword": profile_cfg["keyword"],
+            "source_file": str(Path(profile_cfg["path"])),
+            "rows": profile_rows,
+        }
+
+    simulated_sources: dict[str, list[dict[str, Any]]] = {}
+    simulated_by_year = {year: 0.0 for year in years}
+    dynamic_wells = {well["name"] for well in spec["wells"]}
+    if prescribed_wells & dynamic_wells:
+        raise ValueError(
+            f"prescribed and simulated network sources overlap: {sorted(prescribed_wells & dynamic_wells)}"
+        )
+
+    rates_by_slave: dict[str, dict[tuple[str, int], float]] = {}
+    for slave, wells in sorted(by_slave.items()):
+        rows = slave_rate_rows(coupling_dir / f"slave_rates_{slave}.csv")
+        expected_wells = {well["name"] for well in wells}
+        validate_rows(rows, expected_wells, year_set, f"simulated rates for {slave}")
+        simulated_sources[slave] = rows
+        rates_by_slave[slave] = {
+            (str(row["well"]), int(row["year"])): float(row["q_liq_sm3d"]) for row in rows
+        }
+        for row in rows:
+            simulated_by_year[int(row["year"])] += float(row["q_liq_sm3d"])
+
+    totals_by_year = []
+    total_by_year: dict[int, float] = {}
+    for year in years:
+        total = prescribed_by_year[year] + simulated_by_year[year]
+        total_by_year[year] = total
+        totals_by_year.append(
+            {
+                "year": year,
+                "prescribed_q_liq_sm3d": round(prescribed_by_year[year], 6),
+                "simulated_q_liq_sm3d": round(simulated_by_year[year], 6),
+                "network_q_liq_sm3d": round(total, 6),
+            }
+        )
+
+    request = {
+        "iteration": iteration,
+        "sources": {
+            "prescribed_profiles": profile_sources,
+            "simulated_slaves": simulated_sources,
+        },
+        "totals_by_year": totals_by_year,
+    }
+    request_path = exchange_dir / f"network_request_iteration_{iteration:03d}.json"
+    request_path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
+
+    constraints_by_slave: dict[str, list[dict[str, Any]]] = {slave: [] for slave in by_slave}
+    response_rows: list[dict[str, Any]] = []
+    for year in years:
+        total_rate = total_by_year[year]
+        manifold_pressure = (
+            float(network["outlet_pressure_bar"])
+            + float(network["trunk_friction_a_bar_sm3d"]) * total_rate
+            + float(network["trunk_friction_b_bar_sm3d2"]) * total_rate * total_rate
+        )
+        for slave, wells in sorted(by_slave.items()):
+            for well in wells:
+                q_well = rates_by_slave[slave][(well["name"], year)]
+                p_wh = (
+                    manifold_pressure
+                    + float(network["branch_friction_a_bar_sm3d"]) * q_well
+                    + float(network["branch_friction_b_bar_sm3d2"]) * q_well * q_well
+                )
+                hydrostatic = float(network["fluid_density_kg_m3"]) * GRAVITY * float(well["tvd_m"]) * 1e-5
+                p_bhp = p_wh + hydrostatic
+                row = {
+                    "well": well["name"],
+                    "year": year,
+                    "network_input_q_liq_sm3d": round(q_well, 6),
+                    "prescribed_q_liq_sm3d": round(prescribed_by_year[year], 6),
+                    "simulated_q_liq_sm3d": round(simulated_by_year[year], 6),
+                    "total_network_q_liq_sm3d": round(total_rate, 6),
+                    "p_manifold_bar": round(manifold_pressure, 6),
+                    "p_wh_bar": round(p_wh, 6),
+                    "p_bhp_bar": round(p_bhp, 6),
+                }
+                constraints_by_slave[slave].append(row)
+                response_rows.append({"slave": slave, **row})
+
+    header = [
+        "well",
+        "year",
+        "network_input_q_liq_sm3d",
+        "prescribed_q_liq_sm3d",
+        "simulated_q_liq_sm3d",
+        "total_network_q_liq_sm3d",
+        "p_manifold_bar",
+        "p_wh_bar",
+        "p_bhp_bar",
+    ]
+    for slave, rows in constraints_by_slave.items():
+        write_csv(
+            coupling_dir / f"network_constraints_{slave}.csv",
+            header,
+            [[row[column] for column in header] for row in rows],
+        )
+
+    response = {"iteration": iteration, "constraints": response_rows}
+    (exchange_dir / f"network_response_iteration_{iteration:03d}.json").write_text(
+        json.dumps(response, indent=2) + "\n", encoding="utf-8"
+    )
     report = [
-        f"master_network report - iteration {sys.argv[3]}",
-        f"manifold pressure: {net['manifold_pressure_bar']} bar",
+        f"master_network report - iteration {iteration}",
+        "network inputs:",
+        f"  prescribed profiles: {', '.join(sorted(profile_sources))}",
+        f"  simulated slaves: {', '.join(sorted(simulated_sources))}",
         "",
     ]
-    for slave, wells in sorted(by_slave.items()):
-        rates_csv = coupling_dir / f"slave_rates_{slave}.csv"
-        if rates_csv.exists():
-            demand = read_rates_csv(rates_csv)  # {well: {year: q}}
-        else:
-            demand = {
-                w["name"]: {y: initial.get(w["name"], 250.0) for y in range(1, years + 1)} for w in wells
-            }
-
-        header = ["well", "year", "q_liq_sm3d", "q_gas_sm3d", "p_wh_bar", "p_bhp_bar", "gsat"]
-        rows = []
-        inc_lines = [
-            "GSATPROD",
-            f"-- Production profiles for subsea wells of {slave}, written by master_network",
-            f"-- coupling iteration {sys.argv[3]}. Format: WELL YEAR Q_LIQ Q_GAS P_WH P_BHP GSAT",
-            "--  WELL      YEAR  Q_LIQ_SM3D  Q_GAS_SM3D  P_WH_BAR  P_BHP_BAR  GSAT",
-        ]
-        for w in wells:
-            q0 = initial.get(w["name"], 250.0)
-            for y in range(1, years + 1):
-                q = max(0.0, demand[w["name"]].get(y, demand[w["name"]].get(1, q0)))
-                p_wh = (
-                    net["manifold_pressure_bar"]
-                    + net["friction_a_bar_sm3d"] * q
-                    + net["friction_b_bar_sm3d2"] * q * q
-                )
-                p_bhp = p_wh + net["fluid_density_kg_m3"] * GRAVITY * w["md_m"] * 1e-5
-                gsat = min(0.9, w.get("gsat_base", 0.30) + 0.05 * q / max(q0, 1.0))
-                q_gas = q * w["gor_sm3_sm3"]
-                rows.append(
-                    [w["name"], y, round(q, 2), round(q_gas, 0), round(p_wh, 2), round(p_bhp, 2), round(gsat, 3)]
-                )
-                inc_lines.append(
-                    "    '%s'  %d  %.2f  %.0f  %.2f  %.2f  %.3f /"
-                    % (w["name"], y, q, q_gas, p_wh, p_bhp, gsat)
-                )
-                report.append(f"  {slave}/{w['name']} year {y}: q={q:.2f} sm3/d p_bhp={p_bhp:.2f} bar")
-        inc_lines.append("/")
-        (coupling_dir / f"gsatprod_{slave}.inc").write_text("\n".join(inc_lines) + "\n", encoding="utf-8")
-        write_csv(coupling_dir / f"gsatprofiles_{slave}.csv", header, rows)
-        log(f"wrote GSATPROD table for {slave} ({len(wells)} wells, {years} years)")
-
+    for total in totals_by_year:
+        report.append(
+            "  {year}: prescribed={prescribed_q_liq_sm3d:.2f}, simulated={simulated_q_liq_sm3d:.2f}, "
+            "total={network_q_liq_sm3d:.2f} sm3/d".format(**total)
+        )
     (model_dir / "master_network_report.txt").write_text("\n".join(report) + "\n", encoding="utf-8")
+    log(spec["model"], f"combined prescribed profiles and {len(simulated_sources)} simulated slaves")
 
 
-def run_slave(spec: dict, model_dir: Path) -> None:
-    coupling_dir = model_dir.parent / "coupling"
-    inc_path = coupling_dir / f"gsatprod_{spec['model']}.inc"
-    if not inc_path.exists():
-        raise SystemExit(f"missing GSATPROD table: {inc_path}")
-    rows = parse_gsatprod_inc(inc_path)
+def run_slave(
+    spec: dict[str, Any], model_dir: Path, coupling: dict[str, Any], iteration: int
+) -> None:
+    years = schedule_years(coupling)
+    constraints = read_csv(model_dir.parent / "coupling" / f"network_constraints_{spec['model']}.csv")
+    typed_constraints: list[dict[str, Any]] = [
+        {
+            "well": row["well"],
+            "year": int(row["year"]),
+            "network_input_q_liq_sm3d": float(row["network_input_q_liq_sm3d"]),
+            "total_network_q_liq_sm3d": float(row["total_network_q_liq_sm3d"]),
+            "p_bhp_bar": float(row["p_bhp_bar"]),
+        }
+        for row in constraints
+    ]
+    wells = {well["name"]: well for well in spec["wells"]}
+    validate_rows(
+        [
+            {"well": row["well"], "year": row["year"], "q_liq_sm3d": row["network_input_q_liq_sm3d"]}
+            for row in typed_constraints
+        ],
+        set(wells),
+        set(years),
+        f"network constraints for {spec['model']}",
+    )
+    relaxation = float(coupling["coupling"].get("relaxation", 1.0))
+    if not 0.0 < relaxation <= 1.0:
+        raise ValueError("coupling.relaxation must be in (0, 1]")
 
-    wells = {w["name"]: w for w in spec["wells"]}
-    p_res = {name: w["p_res0_bar"] for name, w in wells.items()}
-    cum = {name: 0.0 for name in wells}
-    out_rows = []
-    report = [f"{spec['model']} report - iteration {sys.argv[3]}", ""]
-    for r in rows:
-        w = wells[r["well"]]
-        p_bhp_net = r["p_bhp"]
-        # Linear IPR with constant productivity index:
-        #   J = q0 / (p_res0 - p_bhp0),  q_ipr = J * (p_res - p_bhp)
-        denom = w["p_res0_bar"] - w["p_bhp0_bar"]
-        q_ipr = w["q0_sm3d"] * (p_res[r["well"]] - p_bhp_net) / denom if denom > 0 else w["q0_sm3d"]
-        q_ipr = max(0.0, q_ipr)
-        q_out = min(r["q_liq"], q_ipr)
-        choked = 1 if q_out < r["q_liq"] - 1e-6 else 0
-        cum[r["well"]] += q_out * 365.0
-        out_rows.append(
+    pressure = {name: float(well["p_res0_bar"]) for name, well in wells.items()}
+    cumulative = {name: 0.0 for name in wells}
+    output_rows: list[list[Any]] = []
+    result_rows: list[dict[str, Any]] = []
+    report = [f"{spec['model']} report - iteration {iteration}", ""]
+    for constraint in sorted(typed_constraints, key=lambda row: (row["well"], row["year"])):
+        well = wells[constraint["well"]]
+        denominator = float(well["p_res0_bar"]) - float(well["p_bhp0_bar"])
+        if denominator <= 0.0:
+            raise ValueError(f"invalid IPR reference pressures for {constraint['well']}")
+        productivity_index = float(well["q0_sm3d"]) / denominator
+        q_ipr = max(0.0, productivity_index * (pressure[constraint["well"]] - constraint["p_bhp_bar"]))
+        q_previous = constraint["network_input_q_liq_sm3d"]
+        q_output = max(0.0, q_previous + relaxation * (q_ipr - q_previous))
+        gas_rate = q_output * float(well["gor_sm3_sm3"])
+        backpressure_limited = int(q_ipr < q_previous - 1e-9)
+        output_rows.append(
             [
-                r["well"],
-                r["year"],
-                round(q_out, 2),
-                round(q_out * w["gor_sm3_sm3"], 0),
-                round(p_bhp_net, 2),
-                round(p_res[r["well"]], 2),
-                choked,
+                constraint["well"],
+                constraint["year"],
+                round(q_output, 6),
+                round(gas_rate, 6),
+                round(constraint["p_bhp_bar"], 6),
+                round(pressure[constraint["well"]], 6),
+                round(q_ipr, 6),
+                backpressure_limited,
+                "simulation_output",
             ]
         )
-        report.append(
-            f"  {r['well']} year {r['year']}: q={q_out:.2f} sm3/d (network {r['q_liq']:.2f}, IPR {q_ipr:.2f})"
-            + ("  CHOKED (IPR limited)" if choked else "")
+        result_rows.append(
+            {
+                "well": constraint["well"],
+                "year": constraint["year"],
+                "q_liq_sm3d": round(q_output, 6),
+                "q_gas_sm3d": round(gas_rate, 6),
+                "network_input_q_liq_sm3d": round(q_previous, 6),
+                "p_bhp_bar": round(constraint["p_bhp_bar"], 6),
+                "p_res_bar": round(pressure[constraint["well"]], 6),
+                "q_ipr_sm3d": round(q_ipr, 6),
+                "backpressure_limited": backpressure_limited,
+            }
         )
-        # reservoir pressure depletion: fixed per year + small cumulative effect
-        p_res[r["well"]] -= w.get("depletion_bar_per_year", 3.0) + 0.5 * (cum[r["well"]] / 1.0e6)
+        report.append(
+            f"  {constraint['well']} {constraint['year']}: network input={q_previous:.2f}, "
+            f"IPR={q_ipr:.2f}, relaxed output={q_output:.2f} sm3/d"
+        )
+        cumulative[constraint["well"]] += q_output * 365.0
+        pressure[constraint["well"]] -= float(well.get("depletion_bar_per_year", 3.0)) + 0.5 * (
+            cumulative[constraint["well"]] / 1.0e6
+        )
 
-    write_csv(
-        coupling_dir / f"slave_rates_{spec['model']}.csv",
-        ["well", "year", "q_liq_sm3d", "q_gas_sm3d", "p_bhp_bar", "p_res_bar", "choked"],
-        out_rows,
+    header = [
+        "well",
+        "year",
+        "q_liq_sm3d",
+        "q_gas_sm3d",
+        "p_bhp_bar",
+        "p_res_bar",
+        "q_ipr_sm3d",
+        "backpressure_limited",
+        "origin",
+    ]
+    coupling_dir = model_dir.parent / "coupling"
+    write_csv(coupling_dir / f"slave_rates_{spec['model']}.csv", header, output_rows)
+    exchange_dir = coupling_dir / "exchange"
+    (exchange_dir / f"slave_result_{spec['model']}_iteration_{iteration:03d}.json").write_text(
+        json.dumps({"iteration": iteration, "model": spec["model"], "rows": result_rows}, indent=2) + "\n",
+        encoding="utf-8",
     )
-    (model_dir / f"slave_{spec['model']}_report.txt").write_text("\n".join(report) + "\n", encoding="utf-8")
-    log(f"slave {spec['model']} produced rates for {len(rows)} well-year rows")
+    (model_dir / f"slave_{spec['model']}_report.txt").write_text(
+        "\n".join(report) + "\n", encoding="utf-8"
+    )
+    log(spec["model"], f"simulated {len(output_rows)} well-year rows")
 
 
 def main() -> None:
     if len(sys.argv) != 4:
-        raise SystemExit(__doc__)
-    model, model_dir_s, _iter_s = sys.argv[1], sys.argv[2], sys.argv[3]
-    model_dir = Path(model_dir_s)
+        raise SystemExit("usage: eclipse_dummy.py <model> <model_dir> <iteration>")
+    model, model_dir_text, iteration_text = sys.argv[1:]
+    model_dir = Path(model_dir_text)
+    iteration = int(iteration_text)
     spec = load_json(model_dir / "simspec.json")
-    coupling = load_json(Path(__file__).resolve().parents[1] / "coupling.json")
+    if spec["model"] != model:
+        raise ValueError(f"model argument {model!r} does not match simspec model {spec['model']!r}")
+    coupling = load_json(model_dir.parent / "coupling_config.json")
     if spec["role"] == "master":
-        run_master(spec, model_dir, coupling)
+        run_master(spec, model_dir, coupling, iteration)
+    elif spec["role"] == "slave":
+        run_slave(spec, model_dir, coupling, iteration)
     else:
-        run_slave(spec, model_dir)
+        raise ValueError(f"unsupported model role: {spec['role']!r}")
 
 
 if __name__ == "__main__":

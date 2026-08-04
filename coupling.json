@@ -1,15 +1,22 @@
 {
-  "title": "Coupled reservoir + network simulation example: master_network + model_n + model_hdn",
+  "title": "Dummy network master with prescribed GSATPROD sources and two simulated reservoir slaves",
   "schedule": {
     "start": "2024-01-01",
     "years": 3,
     "steps_per_year": 1
   },
   "coupling": {
-    "max_iterations": 6,
-    "tolerance": 0.005
+    "max_iterations": 12,
+    "tolerance": 0.005,
+    "relaxation": 0.6
   },
-  "initial_rates_sm3d": {
+  "prescribed_network_profiles": {
+    "external_satellite": {
+      "keyword": "GSATPROD",
+      "path": "input/master_network/profiles/gsatprod_external.inc"
+    }
+  },
+  "initial_slave_rates_sm3d": {
     "N-P1": 500.0,
     "N-P2": 600.0,
     "H-P1": 400.0,
@@ -21,11 +28,11 @@
   },
   "slaves": {
     "model_n": {
-      "mode": "coupled",
+      "role": "coupled_slave",
       "deck": "MODEL_N.DATA"
     },
     "model_hdn": {
-      "mode": "coupled",
+      "role": "coupled_slave",
       "deck": "MODEL_HDN.DATA"
     }
   }

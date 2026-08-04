@@ -3,16 +3,18 @@
 --
 -- One realization = THREE models run "at the same time" through a single
 -- forward-model step (RUN_COUPLED):
---     master_network  dummy reservoir + subsea network model   (master)
---     model_n         subsea wells, GSATPROD profiles from the network
---                     (coupled slave)
---     model_hdn       subsea wells, GSATPROD profiles from the network
---                     (coupled slave; static mode available via coupling.json)
+--     master_network  dummy reservoir + shared subsea network      (master)
+--                     consumes prescribed external GSATPROD profiles PLUS
+--                     simulated production from both slaves
+--     model_n         dynamic reservoir/well simulation             (slave)
+--     model_hdn       dynamic reservoir/well simulation             (slave)
 --
--- The coupling loop (master -> GSATPROD tables -> slaves -> rates ->
--- converge) lives in bin/run_coupled.py. The "simulators" are stand-ins
--- (bin/eclipse_dummy.py) so the example runs without an Eclipse licence;
--- see coupling.json / README for swapping in real Eclipse or OPM Flow.
+-- Exchange loop: slave rates -> master network -> pressure constraints ->
+-- both slaves -> new rates -> convergence. The prescribed external profile
+-- remains an independent, immutable input to the master at every iteration.
+-- The driver lives in ert/bin/scripts/run_coupled.py; the licence-free model
+-- adapter is bin/eclipse_dummy.py. See coupling.json and README.md for the
+-- work required to replace it with real Eclipse or OPM Flow adapters.
 --
 -- Your FMU setups use 100 realizations: set NUM_REALIZATIONS 100 when you
 -- plug in the real decks. For quick local checks keep it small (2) or use:
@@ -35,12 +37,12 @@ RUNPATH_FILE  ../../output/<CASE_DIR>/runpath_file
 
 -- ECLBASE is a path *inside* the runpath (FMU convention). With the dummy
 -- simulators no UNSMRY is produced; with real simulators each model needs
--- its own summary at the FMU-convention path (see README section 6).
+-- its own summary at the FMU-convention path (see README.md).
 ECLBASE       eclipse/model/MASTER
 
 -- --- Uncertain parameters --------------------------------------------------
 -- One scalar per realization: reservoir productivity multiplier sampled
--- from a uniform prior. The coupled slave scales its q0 with it, so every
+-- from a uniform prior. Both simulated slaves scale their q0 with it, so every
 -- realization produces slightly different rates -- the same role that
 -- permeability/rock parameters play in your 100-realisation FMU setups.
 GEN_KW  Q0_MULT  ../../input/templates/q0_mult.tmpl  q0_mult.txt  ../../input/distributions/q0_priors.txt

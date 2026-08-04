@@ -1,7 +1,6 @@
 {
   "model": "model_n",
   "role": "slave",
-  "mode": "coupled",
   "deck": "MODEL_N.DATA",
   "wells": [
     {

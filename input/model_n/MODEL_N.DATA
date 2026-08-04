@@ -1,9 +1,10 @@
 -- ============================================================================
 -- MODEL_N.DATA -- ILLUSTRATIVE deck for the coupled-simulation example.
 --
--- Role: coupled slave. Subsea wells N-P1/N-P2, whose production profiles
--- are NOT specified here: they are written by master_network at every
--- coupling iteration as GSATPROD tables (see INCLUDE below).
+-- Role: coupled slave. Subsea wells N-P1/N-P2 report simulated rates to
+-- master_network. The master combines them with prescribed external profiles
+-- and model_hdn results, solves the shared network, and returns pressure
+-- constraints through the driver-level exchange files.
 --
 -- !!! This deck is NOT executed by the example (no Eclipse licence needed).
 --     The dummy simulator (bin/eclipse_dummy.py) reads simspec.json next
@@ -80,14 +81,14 @@ COMPDAT
   'N-P2' 4 3 1 3 'OPEN' 1* 1* 0.3 /
 /
 -- ---------------------------------------------------------------------------
--- Coupling interface: GSATPROD production profiles for the subsea wells.
--- In the coupled setup this file is REWRITTEN by master_network at every
--- coupling iteration (see bin/run_coupled.py); a real Eclipse run consumes
--- the GSATPROD keyword directly. If your setup uses GSATPTAB instead, keep
--- the same mechanism and just write the table in that keyword's format.
+-- Coupling interface (illustrative): the licence-free driver exchanges
+-- coupling/slave_rates_model_n.csv -> master_network and
+-- coupling/network_constraints_model_n.csv -> this slave. Those CSV files
+-- are NOT Eclipse keywords. In a real coupled run, map the same rate/pressure
+-- contract to the coupling controls supported by your Eclipse/FMU setup.
+-- Do not place the prescribed external GSATPROD profiles in this slave deck;
+-- they belong to the master/network model.
 -- ---------------------------------------------------------------------------
-INCLUDE
-  'coupling/gsatprod_model_n.inc' /
 WCONPROD
   'N-P1' 'OPEN' 'ORAT' 500.0 4* 2500.0 /
   'N-P2' 'OPEN' 'ORAT' 500.0 4* 2500.0 /

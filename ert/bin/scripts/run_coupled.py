@@ -1,30 +1,18 @@
 #!/usr/bin/env python3
-"""Coupled multi-model reservoir forward model -- ERT job + standalone demo.
+"""Run one ERT realization of the master-network/two-slave example.
 
-One ERT realization runs THREE reservoir models "at the same time":
+For each coupling iteration the dummy workflow performs this data exchange:
 
-  master_network -- dummy reservoir with the subsea network model
-  model_n        -- coupled slave (GSATPROD profiles from master_network)
-  model_hdn      -- coupled slave (GSATPROD profiles from master_network;
-                    a static mode is available per model via coupling.json)
+1. ``master_network`` reads immutable prescribed GSATPROD profiles plus the
+   latest simulated rates from both ``model_n`` and ``model_hdn``.
+2. The master solves its illustrative shared network and writes pressure
+   constraints for each slave.
+3. Both reservoir slaves simulate against those constraints and return new
+   rates to the network.
+4. Iteration continues until all slave well/year rates converge.
 
-Coupling loop (fixed-point iteration on well rates):
-
-    for iteration in 1..max_iterations:
-        1. master_network reads the slave wells' demanded rates (from the
-           slaves' simulation results) and solves the network -> writes
-           GSATPROD tables for each coupled slave
-        2. each slave simulates with its GSATPROD table -> reports actual
-           rates back to coupling/
-        3. convergence check: max relative change of coupled-slave rates
-           vs previous iteration <= tolerance -> stop
-
-How this script is launched:
-  * ERT : installed as the RUN_COUPLED forward-model step (job file
-          ert/bin/jobs/RUN_COUPLED). ERT runs it with cwd == realization
-          runpath, which is where GEN_KW wrote q0_mult.txt (the sampled
-          parameter).
-  * Demo: ./run_demo.sh --demo   -> no ERT needed, writes output/demo/
+The executable is installed as one ERT forward-model job. It can also be run
+standalone with ``--demo`` without ERT or an Eclipse licence.
 """
 
 from __future__ import annotations
@@ -32,196 +20,346 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import shutil
 import subprocess
 import sys
+from datetime import date
 from pathlib import Path
+from typing import Any
 
 
 def find_root() -> Path:
-    """Repository root: first ancestor of this script that has coupling.json."""
     here = Path(__file__).resolve()
-    for cand in [here, *here.parents]:
-        if (cand / "coupling.json").exists():
-            return cand
+    for candidate in [here, *here.parents]:
+        if (candidate / "coupling.json").exists():
+            return candidate
     raise SystemExit(f"cannot locate coupling.json from {here}")
 
 
 ROOT = find_root()
-COUPLING_JSON = ROOT / "coupling.json"
+DEFAULT_CONFIG = ROOT / "coupling.json"
 
 
-def log(msg: str) -> None:
-    print(f"[run_coupled] {msg}", flush=True)
+def log(message: str) -> None:
+    print(f"[run_coupled] {message}", flush=True)
 
 
-def load_json(path: Path) -> dict:
-    with open(path, "r", encoding="utf-8") as fh:
-        return json.load(fh)
+def load_json(path: Path) -> dict[str, Any]:
+    with path.open(encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def schedule_years(coupling: dict[str, Any]) -> list[int]:
+    schedule = coupling["schedule"]
+    if int(schedule.get("steps_per_year", 1)) != 1:
+        raise ValueError("dummy example currently supports exactly one coupling step per year")
+    first_year = date.fromisoformat(schedule["start"]).year
+    count = int(schedule["years"])
+    if count < 1:
+        raise ValueError("schedule.years must be positive")
+    return list(range(first_year, first_year + count))
 
 
 def parse_q0_mult(runpath: Path) -> float:
-    """Read the GEN_KW result file (written by ERT into the runpath)."""
-    f = runpath / "q0_mult.txt"
-    if not f.exists():
+    """Read ERT's GEN_KW result; absence means standalone default 1.0."""
+    path = runpath / "q0_mult.txt"
+    if not path.exists():
         return 1.0
-    for line in f.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line and not line.startswith("#"):
-            try:
-                return float(line.split()[-1])
-            except ValueError:
-                pass
-    return 1.0
+    values: list[float] = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or line.startswith("--"):
+            continue
+        try:
+            values.append(float(line.split()[-1]))
+        except ValueError as exc:
+            raise ValueError(f"invalid Q0_MULT result row in {path}: {raw}") from exc
+    if len(values) != 1 or values[0] <= 0.0:
+        raise ValueError(f"expected exactly one positive Q0_MULT value in {path}, found {values}")
+    return values[0]
 
 
 def stage_model(runpath: Path, model: str) -> None:
-    src = ROOT / "input" / model
-    dst = runpath / model
-    if dst.exists():
-        shutil.rmtree(dst)
-    shutil.copytree(src, dst)
-    log(f"staged {model} -> {dst}")
+    source = ROOT / "input" / model
+    if not source.is_dir():
+        raise FileNotFoundError(f"model input directory does not exist: {source}")
+    destination = runpath / model
+    if destination.exists():
+        shutil.rmtree(destination)
+    shutil.copytree(source, destination)
+    log(f"staged {model} -> {destination}")
 
 
-def apply_q0_mult(runpath: Path, model: str, mult: float) -> None:
-    """Scale the coupled slave's productivity with the sampled parameter."""
-    simspec_path = runpath / model / "simspec.json"
-    spec = load_json(simspec_path)
-    for w in spec.get("wells", []):
-        w["q0_sm3d"] = round(w["q0_sm3d"] * mult, 2)
-    simspec_path.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
+def apply_q0_mult(runpath: Path, model: str, multiplier: float) -> None:
+    path = runpath / model / "simspec.json"
+    spec = load_json(path)
+    if spec.get("role") != "slave":
+        raise ValueError(f"Q0_MULT can only be applied to slave models: {model}")
+    wells = spec.get("wells", [])
+    if not wells:
+        raise ValueError(f"slave model has no wells: {model}")
+    for well in wells:
+        well["q0_sm3d"] = round(float(well["q0_sm3d"]) * multiplier, 6)
+    path.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
 
 
 def run_dummy(model: str, runpath: Path, iteration: int) -> None:
-    cmd = [
-        sys.executable,
-        str(ROOT / "bin" / "eclipse_dummy.py"),
-        model,
-        str(runpath / model),
-        str(iteration),
-    ]
-    subprocess.run(cmd, check=True, cwd=str(runpath))
+    subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "bin" / "eclipse_dummy.py"),
+            model,
+            str(runpath / model),
+            str(iteration),
+        ],
+        check=True,
+        cwd=runpath,
+    )
 
 
-def read_slave_rates(coupling_dir: Path, model: str) -> dict:
+def read_slave_rates(coupling_dir: Path, model: str) -> dict[str, dict[int, float]]:
     path = coupling_dir / f"slave_rates_{model}.csv"
     if not path.exists():
-        return {}
-    out: dict = {}
-    with open(path, newline="", encoding="utf-8") as fh:
-        for row in csv.DictReader(fh):
-            out.setdefault(row["well"], {})[int(row["year"])] = float(row["q_liq_sm3d"])
-    return out
+        raise FileNotFoundError(f"slave simulation did not produce required rates: {path}")
+    rates: dict[str, dict[int, float]] = {}
+    with path.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    if not rows:
+        raise ValueError(f"slave rates file is empty: {path}")
+    for row in rows:
+        well = row["well"]
+        year = int(row["year"])
+        if year in rates.setdefault(well, {}):
+            raise ValueError(f"duplicate slave rate row for {model}/{well}/{year}")
+        rate = float(row["q_liq_sm3d"])
+        if rate < 0.0:
+            raise ValueError(f"negative slave rate for {model}/{well}/{year}: {rate}")
+        rates[well][year] = rate
+    return rates
 
 
-def max_rel_diff(a: dict, b: dict) -> float:
-    worst = 0.0
-    for well, years in b.items():
-        for y, q in years.items():
-            q_prev = a.get(well, {}).get(y)
-            if q_prev is None:
-                continue
-            worst = max(worst, abs(q - q_prev) / max(abs(q_prev), 1e-9))
-    return worst
+def flatten_rates(rates: dict[str, dict[int, float]]) -> dict[tuple[str, int], float]:
+    return {(well, year): value for well, years in rates.items() for year, value in years.items()}
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--demo", action="store_true", help="standalone demo run under output/demo/ (no ERT)")
-    ap.add_argument("--runpath", help="explicit runpath (default: cwd under ERT, output/demo/realization-0 in demo)")
-    args = ap.parse_args()
+def max_rel_diff(previous: dict[str, dict[int, float]], current: dict[str, dict[int, float]]) -> float:
+    previous_flat = flatten_rates(previous)
+    current_flat = flatten_rates(current)
+    if previous_flat.keys() != current_flat.keys():
+        missing = sorted(previous_flat.keys() - current_flat.keys())
+        extra = sorted(current_flat.keys() - previous_flat.keys())
+        raise ValueError(f"rate coverage changed between iterations; missing={missing}, extra={extra}")
+    if not current_flat:
+        raise ValueError("cannot calculate convergence from an empty rate set")
+    return max(
+        abs(current_flat[key] - previous_flat[key]) / max(abs(previous_flat[key]), 1e-9)
+        for key in current_flat
+    )
 
-    coupling = load_json(COUPLING_JSON)
+
+def validate_topology(coupling: dict[str, Any]) -> None:
+    years = schedule_years(coupling)
+    del years  # validation side effect: schedule must parse before any staging
+    settings = coupling["coupling"]
+    max_iterations = settings.get("max_iterations")
+    if (
+        isinstance(max_iterations, bool)
+        or not isinstance(max_iterations, int)
+        or max_iterations < 1
+    ):
+        raise ValueError("coupling.max_iterations must be a positive integer")
+    tolerance = float(settings.get("tolerance"))
+    if not math.isfinite(tolerance) or tolerance <= 0.0:
+        raise ValueError("coupling.tolerance must be a finite positive number")
+    relaxation = float(settings.get("relaxation"))
+    if not math.isfinite(relaxation) or not 0.0 < relaxation <= 1.0:
+        raise ValueError("coupling.relaxation must be in (0, 1]")
+
+    master = coupling["master"]["model"]
+    if master in coupling["slaves"]:
+        raise ValueError("master model cannot also be configured as a slave")
+    if set(coupling["slaves"]) != {"model_n", "model_hdn"}:
+        raise ValueError("this example requires both model_n and model_hdn as coupled slaves")
+    if not coupling.get("prescribed_network_profiles"):
+        raise ValueError("at least one prescribed network profile is required")
+    profile_prefix = Path("input") / master
+    for name, profile in coupling["prescribed_network_profiles"].items():
+        if profile.get("keyword") not in {"GSATPROD", "GSATPTAB"}:
+            raise ValueError(f"unsupported prescribed profile keyword for {name}: {profile.get('keyword')!r}")
+        configured_path = Path(profile["path"])
+        if configured_path.is_absolute() or ".." in configured_path.parts:
+            raise ValueError(f"prescribed profile path must be repository-relative: {configured_path}")
+        try:
+            configured_path.relative_to(profile_prefix)
+        except ValueError as exc:
+            raise ValueError(
+                f"prescribed profile {name} must live below {profile_prefix}: {configured_path}"
+            ) from exc
+        if not (ROOT / configured_path).is_file():
+            raise FileNotFoundError(f"prescribed network profile does not exist: {ROOT / configured_path}")
+
+
+def validate_runpath(runpath: Path) -> None:
+    protected_exact = {Path("/").resolve(), Path.home().resolve(), ROOT.resolve()}
+    if runpath in protected_exact:
+        raise ValueError(f"refusing unsafe runpath: {runpath}")
+    protected_trees = [ROOT / "input", ROOT / "bin", ROOT / "ert", ROOT / "tests"]
+    for protected in protected_trees:
+        protected = protected.resolve()
+        if runpath == protected or runpath.is_relative_to(protected):
+            raise ValueError(f"runpath overlaps protected repository sources: {runpath}")
+
+
+def initial_rate_rows(
+    runpath: Path, coupling: dict[str, Any], model: str, years: list[int]
+) -> dict[str, dict[int, float]]:
+    spec = load_json(runpath / model / "simspec.json")
+    initial = coupling["initial_slave_rates_sm3d"]
+    rows: list[list[Any]] = []
+    rates: dict[str, dict[int, float]] = {}
+    for well in spec["wells"]:
+        name = well["name"]
+        if name not in initial:
+            raise ValueError(f"missing initial rate for {model}/{name}")
+        rate = float(initial[name])
+        if rate < 0.0:
+            raise ValueError(f"negative initial rate for {model}/{name}")
+        rates[name] = {}
+        for year in years:
+            rates[name][year] = rate
+            rows.append([name, year, rate, rate * float(well["gor_sm3_sm3"]), "initial_guess"])
+    path = runpath / "coupling" / f"slave_rates_{model}.csv"
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["well", "year", "q_liq_sm3d", "q_gas_sm3d", "origin"])
+        writer.writerows(rows)
+    return rates
+
+
+def write_report(
+    runpath: Path,
+    coupling: dict[str, Any],
+    q0_mult: float,
+    history: list[list[Any]],
+    converged: bool,
+) -> str:
     master_model = coupling["master"]["model"]
     slaves = coupling["slaves"]
+    profile_description = ", ".join(
+        f"{name} ({profile['keyword']})"
+        for name, profile in coupling["prescribed_network_profiles"].items()
+    )
+    slave_description = ", ".join(
+        f"{name} ({str(cfg['role']).replace('_', ' ')})" for name, cfg in slaves.items()
+    )
+    lines = [
+        "COUPLED RUN REPORT",
+        "===================",
+        f"runpath            : {runpath}",
+        f"q0_mult            : {q0_mult}",
+        f"master model       : {master_model}",
+        f"prescribed profiles : {profile_description}",
+        f"slave models       : {slave_description}",
+        f"iterations         : {history[-1][0]} of {coupling['coupling']['max_iterations']} "
+        f"(converged={converged}, tol={coupling['coupling']['tolerance']})",
+        "",
+        "Network input contract:",
+        "  prescribed GSATPROD/GSATPTAB profiles -> master_network",
+        "  model_n simulation results            -> master_network",
+        "  model_hdn simulation results          -> master_network",
+        "  master network pressure constraints   -> both slaves",
+        "",
+        "Final simulated slave rates (sm3/d):",
+    ]
+    for name in slaves:
+        rates = read_slave_rates(runpath / "coupling", name)
+        for well, year_rates in sorted(rates.items()):
+            rendered = ", ".join(f"{year}: {rate:.1f}" for year, rate in sorted(year_rates.items()))
+            lines.append(f"  {name}/{well}: {rendered}")
+    report = "\n".join(lines) + "\n"
+    (runpath / "COUPLED_REPORT.txt").write_text(report, encoding="utf-8")
+    return report
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--demo", action="store_true", help="run outside ERT")
+    parser.add_argument("--runpath", help="explicit output runpath")
+    parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="coupling configuration JSON")
+    args = parser.parse_args()
+
+    coupling = load_json(Path(args.config))
+    validate_topology(coupling)
+    master_model = coupling["master"]["model"]
+    slaves = coupling["slaves"]
+    years = schedule_years(coupling)
 
     if args.runpath:
-        runpath = Path(args.runpath)
+        runpath = Path(args.runpath).resolve()
     elif args.demo or not (Path.cwd() / "q0_mult.txt").exists():
         runpath = ROOT / "output" / "demo" / "realization-0"
     else:
         runpath = Path.cwd()
+    validate_runpath(runpath)
     runpath.mkdir(parents=True, exist_ok=True)
-    # fresh coupling dir: repeated demo runs must not pick up stale CSVs
-    shutil.rmtree(runpath / "coupling", ignore_errors=True)
-    (runpath / "coupling").mkdir(parents=True, exist_ok=True)
+
+    coupling_dir = runpath / "coupling"
+    if coupling_dir.exists():
+        shutil.rmtree(coupling_dir)
+    coupling_dir.mkdir(parents=True)
 
     q0_mult = parse_q0_mult(runpath)
-    if args.demo or args.runpath:
+    if not (runpath / "q0_mult.txt").exists():
         (runpath / "q0_mult.txt").write_text(f"Q0_MULT  {q0_mult:.6f}\n", encoding="utf-8")
+    (runpath / "coupling_config.json").write_text(
+        json.dumps(coupling, indent=2) + "\n", encoding="utf-8"
+    )
     log(f"runpath: {runpath}   q0_mult: {q0_mult}")
 
-    # stage the three models into the runpath and prepare the coupling files
     stage_model(runpath, master_model)
-    prev_rates: dict = {}
-    for name, cfg in slaves.items():
+    previous_rates: dict[str, dict[str, dict[int, float]]] = {}
+    for name in slaves:
         stage_model(runpath, name)
-        if cfg["mode"] == "coupled":
-            apply_q0_mult(runpath, name, q0_mult)
-        else:
-            static = ROOT / cfg["static_profile"]
-            shutil.copyfile(static, runpath / "coupling" / f"gsatprod_{name}.inc")
-            log(f"static profile for {name}: {static.name}")
+        apply_q0_mult(runpath, name, q0_mult)
+        previous_rates[name] = initial_rate_rows(runpath, coupling, name, years)
 
-    max_iter = int(coupling["coupling"]["max_iterations"])
-    tol = float(coupling["coupling"]["tolerance"])
-    history: list[list] = []
+    max_iterations = int(coupling["coupling"]["max_iterations"])
+    tolerance = float(coupling["coupling"]["tolerance"])
+    history: list[list[Any]] = []
     converged = False
 
-    for it in range(1, max_iter + 1):
-        log(f"--- coupling iteration {it}/{max_iter} ---")
-        run_dummy(master_model, runpath, it)
-        for name, cfg in slaves.items():
-            run_dummy(name, runpath, it)
+    for iteration in range(1, max_iterations + 1):
+        log(f"--- coupling iteration {iteration}/{max_iterations} ---")
+        run_dummy(master_model, runpath, iteration)
+        for name in slaves:
+            run_dummy(name, runpath, iteration)
 
-        if it == 1:
-            history.append([it, ""])
-            log("iteration 1: slaves ran from the initial rate guess")
-            for name, cfg in slaves.items():
-                prev_rates[name] = read_slave_rates(runpath / "coupling", name)
-            continue
-
-        diff = 0.0
-        for name, cfg in slaves.items():
-            if cfg["mode"] != "coupled":
-                continue
-            rates = read_slave_rates(runpath / "coupling", name)
-            diff = max(diff, max_rel_diff(prev_rates.get(name, {}), rates))
-            prev_rates[name] = rates
-        history.append([it, round(diff, 6)])
-        log(f"iteration {it}: max relative rate change = {diff:.4%}")
-        if diff <= tol:
+        current_rates: dict[str, dict[str, dict[int, float]]] = {}
+        difference = 0.0
+        for name in slaves:
+            current_rates[name] = read_slave_rates(coupling_dir, name)
+            difference = max(difference, max_rel_diff(previous_rates[name], current_rates[name]))
+        history.append([iteration, round(difference, 9)])
+        log(f"iteration {iteration}: max relative slave-rate change = {difference:.4%}")
+        if difference <= tolerance:
             converged = True
             break
+        previous_rates = current_rates
 
-    # convergence history + final report
-    with open(runpath / "coupling" / "convergence_history.csv", "w", newline="", encoding="utf-8") as fh:
-        w = csv.writer(fh)
-        w.writerow(["iteration", "max_rel_diff"])
-        w.writerows(history)
+    with (coupling_dir / "convergence_history.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["iteration", "max_rel_diff"])
+        writer.writerows(history)
 
-    slave_desc = ", ".join(f"{n} ({c['mode']})" for n, c in slaves.items())
-    lines = [
-        "COUPLED RUN REPORT",
-        "===================",
-        f"runpath       : {runpath}",
-        f"q0_mult       : {q0_mult}",
-        f"master model  : {master_model}",
-        f"slave models  : {slave_desc}",
-        f"iterations    : {history[-1][0]} of {max_iter} (converged={converged}, tol={tol})",
-        "",
-        "Final well rates (sm3/d) by year:",
-    ]
-    for name, cfg in slaves.items():
-        rates = read_slave_rates(runpath / "coupling", name)
-        for well, years in sorted(rates.items()):
-            ys = ", ".join(f"{y}: {q:.1f}" for y, q in sorted(years.items()))
-            lines.append(f"  {name}/{well}: {ys}")
-    (runpath / "COUPLED_REPORT.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print("\n".join(lines))
-    print("COUPLED RUN COMPLETE" + (" (converged)" if converged else " (max iterations reached)"))
+    report = write_report(runpath, coupling, q0_mult, history, converged)
+    print(report, end="")
+    if not converged:
+        print("COUPLED RUN FAILED: maximum iterations reached without convergence", file=sys.stderr)
+        return 2
+    print("COUPLED RUN COMPLETE (converged)")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -1,177 +1,271 @@
-# Coupled reservoir + network simulation example (Eclipse-style, ERT/FMU)
+# Coupled reservoir/network simulation example with ERT
 
-An **example** of how to simulate two (three, actually) reservoir models
-"at the same time" in one ERT realization, following the FMU conventions
-of your existing setups, **without needing an Eclipse licence**.
+A licence-free, executable example of one ERT realization coordinating:
 
+- a **dummy reservoir master that hosts the shared subsea network**;
+- **model_n**, a simulated reservoir slave;
+- **model_hdn**, a simulated reservoir slave; and
+- prescribed **GSATPROD-style production profiles for external wells** that
+  are inputs to the network in addition to both slaves' simulation results.
+
+The Python dummy makes the orchestration and exchange files testable without
+an Eclipse licence. The included `.DATA`, `NETWORK`, and `GSATPROD` records are
+illustrative scaffolds, **not simulator-validated production decks**.
+
+## Intended topology
+
+```text
+ prescribed external profiles
+ GSATPROD / GSATPTAB
+ (EXT-P1, EXT-P2)
+           │
+           │ immutable rates every coupling iteration
+           ▼
+ ┌─────────────────────────────────────────────────────┐
+ │ master_network                                      │
+ │ dummy reservoir + shared subsea network             │
+ │                                                     │
+ │ network input = prescribed profiles                 │
+ │               + model_n simulated rates             │
+ │               + model_hdn simulated rates           │
+ └──────────────┬──────────────────────┬───────────────┘
+                │ pressure constraints │ pressure constraints
+                ▼                      ▼
+      ┌──────────────────┐   ┌───────────────────┐
+      │ model_n          │   │ model_hdn         │
+      │ reservoir slave  │   │ reservoir slave   │
+      │ N-P1, N-P2       │   │ H-P1, H-P2        │
+      └────────┬─────────┘   └─────────┬─────────┘
+               │ simulated rates       │ simulated rates
+               └────────────► network ◄┘
+                       next iteration
 ```
-                 ┌───────────────────────────────────┐
-                 │  master_network  (master, dummy)  │
-                 │  reservoir + subsea NETWORK model │
-                 └──────────────┬────────────────────┘
-                                │ GSATPROD tables written per coupling
-                                │ iteration, for BOTH slaves:
-                                │ coupling/gsatprod_model_n.inc
-                                │ coupling/gsatprod_model_hdn.inc
-              ┌─────────────────┴──────────────────┐
-              ▼                                    ▼
- ┌───────────────────────────┐      ┌───────────────────────────┐
- │  model_n  (coupled slave) │      │  model_hdn (coupled slave)│
- │  subsea wells N-P1, N-P2  │      │  subsea wells H-P1, H-P2  │
- └─────────────┬─────────────┘      └─────────────┬─────────────┘
-               │ actual rates from simulation      │ actual rates from simulation
-               └──────────────► network ◄──────────┘
-                              (next iteration)
+
+The external profile wells are deliberately disjoint from the four simulated
+slave wells. This proves that the network receives **three independent source
+categories**, rather than treating one slave as a static profile.
+
+## One ERT realization
+
+ERT launches one installed forward-model job, `RUN_COUPLED`. The driver at
+`ert/bin/scripts/run_coupled.py` stages all three model folders and performs a
+fixed-point loop:
+
+1. Start with rate guesses for the four slave wells.
+2. `master_network` reads:
+   - `input/master_network/profiles/gsatprod_external.inc`;
+   - `coupling/slave_rates_model_n.csv`; and
+   - `coupling/slave_rates_model_hdn.csv`.
+3. The master combines all rates in one shared-network calculation and writes:
+   - `coupling/network_constraints_model_n.csv`; and
+   - `coupling/network_constraints_model_hdn.csv`.
+4. Both slaves simulate against their network BHP constraints and overwrite
+   their `slave_rates_*.csv` results.
+5. Repeat until the maximum relative rate change is below the configured
+   tolerance. A non-converged run exits nonzero so ERT cannot silently accept
+   a partial result.
+
+The dummy uses annual 2024–2026 report steps, a linear IPR for each slave well,
+shared trunk pressure loss based on **total liquid network rate**, per-well
+branch loss, hydrostatic head, and under-relaxation. The gas-rate, prescribed
+PWH/BHP, and GSAT columns are retained in exchange artifacts for provenance but
+do not drive this synthetic pressure calculation. It is an orchestration
+example, not a calibrated or multiphase network model.
+
+## Inspectable exchange contract
+
+Every runpath contains evidence of the data flow:
+
+```text
+coupling/
+├── slave_rates_model_n.csv
+├── slave_rates_model_hdn.csv
+├── network_constraints_model_n.csv
+├── network_constraints_model_hdn.csv
+├── convergence_history.csv
+└── exchange/
+    ├── network_request_iteration_001.json
+    ├── network_response_iteration_001.json
+    ├── slave_result_model_n_iteration_001.json
+    ├── slave_result_model_hdn_iteration_001.json
+    └── ... one set per coupling iteration
 ```
 
-| Model | Role | Production profiles |
-|---|---|---|
-| `master_network` | master — dummy reservoir + network model | solves the network (manifold pressure + riser friction + hydrostatics) from the slaves' simulation results |
-| `model_n` | coupled slave | GSATPROD table **rewritten every coupling iteration** by the master |
-| `model_hdn` | coupled slave | GSATPROD table **rewritten every coupling iteration** by the master |
+Each `network_request_iteration_*.json` separates:
 
-Both slaves feed their simulated rates (and the network's own profiles) back
-into the master, and receive fresh GSATPROD profiles from it, until the
-fixed-point iteration converges. A per-model `mode=static` toggle in
-`coupling.json` exists for the case where one model should keep its old
-static GSATPROD file (the "one model remains in gsatprod" scenario) — the
-static table is kept in `input/static_profiles/`.
-
-## The coupling loop
-
-Each ERT realization runs the three models through one forward-model step,
-`RUN_COUPLED` (`ert/bin/scripts/run_coupled.py`):
-
-1. **Master** reads the slave wells' demanded rates (previous iteration —
-   i.e. the slaves' own simulation results — or the initial guess in
-   `coupling.json`), solves the network and writes a `GSATPROD`
-   production-profile table for **each coupled slave**:
-   `coupling/gsatprod_model_n.inc` and `coupling/gsatprod_model_hdn.inc`.
-2. **Slaves** simulate with their GSATPROD table (the one just written)
-   and report their actual rates back: `coupling/slave_rates_<model>.csv`.
-3. **Convergence check**: max relative change of the coupled slaves' rates
-   vs the previous iteration. Below `coupling.tolerance` → converged;
-   otherwise iterate (up to `coupling.max_iterations`).
-
-This is a fixed-point (explicit sequential) coupling on well rates — the
-same pattern used to couple a network simulator to one or more reservoir
-models. It converges in 2–3 iterations for this example; real coupled
-setups use the same loop with tighter controls and per-timestep exchange.
-
-## Folder layout
-
+```json
+{
+  "sources": {
+    "prescribed_profiles": {
+      "external_satellite": {"keyword": "GSATPROD", "rows": []}
+    },
+    "simulated_slaves": {
+      "model_n": [],
+      "model_hdn": []
+    }
+  },
+  "totals_by_year": []
+}
 ```
+
+That file is the primary acceptance artifact for the required topology.
+
+## Repository layout
+
+```text
 coupled-sim-eclipse/
 ├── README.md
-├── coupling.json              # coupling protocol: models, modes, wells, tolerance
-├── run_demo.sh                # standalone demo, no ERT needed
+├── coupling.json
+├── run_demo.sh
 ├── bin/
-│   └── eclipse_dummy.py       # stand-in "simulator" (plays eclipse100/flow role)
+│   └── eclipse_dummy.py
 ├── ert/
-│   ├── model/01_coupled.ert   # the ERT config
+│   ├── model/01_coupled.ert
 │   └── bin/
-│       ├── jobs/RUN_COUPLED   # ERT job definition (INSTALL_JOB)
-│       └── scripts/run_coupled.py  # forward-model driver (ERT job + demo runner)
+│       ├── jobs/RUN_COUPLED
+│       └── scripts/run_coupled.py
 ├── input/
-│   ├── master_network/        # MASTER.DATA + network/ + simspec.json
-│   ├── model_n/               # MODEL_N.DATA + simspec.json (coupled slave)
-│   ├── model_hdn/             # MODEL_HDN.DATA + simspec.json (coupled slave)
-│   ├── static_profiles/       # gsatprod_model_hdn.inc (static GSATPROD table)
-│   ├── templates/q0_mult.tmpl # GEN_KW template
-│   └── distributions/         # GEN_KW priors (UNIFORM 0.8 1.2)
-└── output/                    # generated runs (gitignored)
+│   ├── master_network/
+│   │   ├── MASTER.DATA
+│   │   ├── simspec.json
+│   │   ├── network/network.inc
+│   │   └── profiles/gsatprod_external.inc
+│   ├── model_n/
+│   │   ├── MODEL_N.DATA
+│   │   └── simspec.json
+│   ├── model_hdn/
+│   │   ├── MODEL_HDN.DATA
+│   │   └── simspec.json
+│   ├── templates/q0_mult.tmpl
+│   └── distributions/q0_priors.txt
+└── tests/
+    └── test_coupled_workflow.py
 ```
 
-## Quick start
+Generated runpaths are written below `output/` and ignored by Git.
 
-**1. Standalone demo (no ERT, no licence):**
+## Quick start without Eclipse or ERT
 
 ```bash
+cd /home/javier/projects/coupled-sim-eclipse
 ./run_demo.sh
-# writes output/demo/realization-0/ ... COUPLED_REPORT.txt
 ```
 
-**2. With ERT** (example was verified against `ert 23.0.1`; the venv in
-`/home/javier/projects/ert_fmu/.venv` has it). Remember the PATH trap:
-launch ERT with the venv on `PATH` so `fm_dispatch.py` resolves:
+The final report is:
+
+```text
+output/demo/realization-0/COUPLED_REPORT.txt
+```
+
+Inspect the final network request with, for example:
+
+```bash
+python3 -m json.tool \
+  output/demo/realization-0/coupling/exchange/network_request_iteration_008.json
+```
+
+The exact final iteration can vary if the tolerance or relaxation is changed.
+
+## Automated tests
+
+The suite uses only the Python standard library:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+It verifies that:
+
+- the network request contains the prescribed profile and both slave outputs;
+- prescribed and simulated wells do not overlap;
+- network totals equal prescribed plus simulated rates;
+- both slaves receive network constraints for 2024–2026;
+- shared manifold pressure uses prescribed plus simulated flow;
+- malformed or incomplete prescribed-profile coverage is rejected;
+- invalid coupling controls are rejected before runpath changes;
+- malformed ERT parameters are not silently defaulted;
+- non-convergence fails the forward model; and
+- the report states all three network-input categories.
+
+## ERT execution
+
+The example was developed against ERT 23.0.1 in the existing local venv:
 
 ```bash
 cd ert/model
-PATH=/home/javier/projects/ert_fmu/.venv/bin:$PATH ert test_run 01_coupled.ert
-# or, for the full ensemble:
-PATH=/home/javier/projects/ert_fmu/.venv/bin:$PATH ert ensemble_experiment 01_coupled.ert
+PATH=/home/javier/projects/ert_fmu/.venv/bin:$PATH \
+  ert test_run 01_coupled.ert
+
+PATH=/home/javier/projects/ert_fmu/.venv/bin:$PATH \
+  ert ensemble_experiment 01_coupled.ert
 ```
 
-`NUM_REALIZATIONS` is set to 2 in the config — **set it to 100** (as in your
-FMU setups) once you plug in the real decks. Each realization samples
-`Q0_MULT` (uniform 0.8–1.2) and scales the coupled slave's productivity, so
-the ensemble shows run-to-run rate variation — the same role permeability/
-rock parameters play in your real FMU setups.
+Verification on ERT 23.0.1:
 
-## Mapping to your real FMU setup
+- `ert test_run`: 1/1 realization passed;
+- `ert ensemble_experiment`: 2/2 realizations passed;
+- both realizations converged in 8/12 coupling iterations; and
+- sampled `Q0_MULT` values `0.836549` and `0.999312` propagated through both
+  reservoir slaves while the prescribed external profile remained unchanged.
 
-Your existing 100-realization ERT/FMU setups for `model_n` and `model_hdn`
-already contain everything that is a placeholder here:
+`NUM_REALIZATIONS` is intentionally `2` for a cheap example. Change it to
+`100` when integrating the real FMU ensembles. `Q0_MULT` is sampled from
+`UNIFORM 0.8 1.2` and scales the productivity of both reservoir slaves; the
+prescribed external profiles remain unchanged.
 
-- **Decks**: replace `input/<model>/*.DATA` (+ include trees) with your
-  real decks; keep the `INCLUDE 'coupling/gsatprod_<model>.inc' /` line in
-  the SCHEDULE so the driver keeps feeding the profiles.
-- **Network model**: replace `input/master_network/network/network.inc`
-  with your real NETWORK block; the master's `simspec.json` is only a
-  stand-in for the network solve.
-- **GSATPROD / GSATPTAB**: the table format in this example
-  (`WELL YEAR Q_LIQ Q_GAS P_WH P_BHP GSAT`) is a documented convention —
-  adapt `bin/eclipse_dummy.py`'s `parse_gsatprod_inc()`/writer to the exact
-  keyword syntax your decks consume. If your setup uses `GSATPTAB`, write
-  the same profile in that keyword's format; the coupling mechanism is
-  identical.
-- **Parameters**: `GEN_KW Q0_MULT` stands in for your real rock/permeability
-  parameterization (`GEN_KW ROCK <template> <include> <priors>` style).
-- **Observations**: none here; add `SUMMARY` keys + an `.obs` config
-  (`SUMMARY_OBSERVATION`) exactly as in `ert_fmu/04_history_match.ert`
-  when you move to history matching.
+ERT owns the outer ensemble parallelism. The Python forward-model job owns the
+inner, per-realization model coupling.
 
-## Going real: swap the dummy simulators for Eclipse / OPM Flow
+## Mapping to the real FMU/Eclipse setup
 
-The "simulators" are `bin/eclipse_dummy.py` invocations inside
-`ert/bin/scripts/run_coupled.py` (`run_dummy()`). To go real:
+Do **not** replace `eclipse_dummy.py` with a single `flow MODEL.DATA` call and
+assume coupling is complete. A real adapter must implement each boundary:
 
-1. Replace the `run_dummy()` body per model with the real command, e.g.
-   `eclrun eclipse100 <deck>` or `flow <deck>` (OPM Flow is already
-   installed on this machine at `/usr/bin/flow`), running with cwd =
-   `<runpath>/<model>/`.
-2. The decks then consume the GSATPROD includes directly — that is the
-   actual coupling interface; the CSV files are only for the dummy.
-3. With real simulators, each model writes its own summary; point `ECLBASE`
-   per model inside the runpath (FMU convention:
-   `eclipse/model/<NAME>`), and uncomment the `SUMMARY` block so ERT can
-   read responses. Note: one `ECLBASE` per config — for per-model summaries
-   use the FMU pattern of separate summary dirs per model or `GEN_DATA`.
-4. Real coupled workflows exchange **more** than profiles (BHP, lift gas,
-   network pressures) and iterate within timesteps; extend the loop in
-   `ert/bin/scripts/run_coupled.py` accordingly.
+1. Stage the selected realization of `model_n`, `model_hdn`, and the master.
+2. Run/continue both slave simulators to the coupling date.
+3. Extract the required well rates and other network-bound quantities from
+   their summary/restart outputs.
+4. Render those dynamic values into the master/network inputs **while also
+   retaining the prescribed GSATPROD/GSATPTAB profile sources**.
+5. Run/continue the master/network model.
+6. Extract network-calculated constraints such as wellhead pressure, BHP,
+   choke setting, lift-gas allocation, or group limits.
+7. Render those constraints back into each slave's supported control format.
+8. Iterate at the same coupling date, then advance when converged.
+9. Fail the realization when a simulator fails, exchange coverage is
+   incomplete, or coupling does not converge.
 
-## Pitfalls (learned the hard way in `ert_fmu`)
+The concrete Eclipse coupling keywords, restart commands, summary vectors, and
+GSATPROD/GSATPTAB record layouts depend on the Eclipse version and your current
+FMU deck conventions. They must be copied from your working setup/manual; this
+repository does not claim to validate proprietary keyword syntax.
 
-- **`fm_dispatch.py` PATH trap**: launch ERT with the venv on `PATH`
-  (`PATH=<venv>/bin:$PATH ert ...`) or every realization dies with
-  `[Errno 2] No such file or directory: 'fm_dispatch.py'`.
-- **Memory, not cores**: keep `QUEUE_OPTION LOCAL MAX_RUNNING` low
-  (~240 MB per slot with real simulators, plus ERT's own ~370 MB).
-- `ert lint` exits 0 regardless and misreports built-in jobs; use
-  `ert test_run` as the parse/run gate.
-- `GEN_KW` template placeholders must match the parameter name
-  (`<Q0_MULT>` ↔ `Q0_MULT`).
-- The `--` comment syntax in ERT config files means any job `ARGLIST` flag
-  must be quoted.
+OPM Flow is installed at `/usr/bin/flow`, but the illustrative `NETWORK` and
+`GSATPROD` records in this repository have not been asserted to be supported by
+Flow. The safe next integration step is to build adapters around actual model
+outputs and a known-good deck snapshot, not to treat the illustrative decks as
+parser-valid.
 
-## Files reference
+## Configuration reference
 
-| File | What it is |
-|---|---|
-| `coupling.json` | the coupling protocol — edit modes (`coupled`/`static`), wells, tolerance |
-| `ert/bin/scripts/run_coupled.py` | per-realization driver: stage models → master → slaves → converge |
-| `bin/eclipse_dummy.py` | licence-free stand-in for eclipse100/flow; reads `simspec.json` |
-| `ert/model/01_coupled.ert` | ERT config (runpath layout, GEN_KW, INSTALL_JOB, FORWARD_MODEL) |
-| `input/*/simspec.json` | machine-readable model specs for the dummy simulators |
-| `input/static_profiles/gsatprod_model_hdn.inc` | optional static GSATPROD table (used only if a model is set to `mode=static` in coupling.json) |
+`coupling.json` defines:
+
+- annual schedule and report years;
+- fixed-point tolerance, maximum iterations, and relaxation;
+- prescribed network profile sources and keyword type;
+- initial slave-rate guesses;
+- the master model; and
+- both required coupled slaves.
+
+`input/*/simspec.json` contains only dummy physics. It is not a substitute for
+FMU model configuration.
+
+## ERT path rules used here
+
+- `GEN_KW` input paths are relative to `ert/model/`.
+- `RUNPATH`, `ENSPATH`, and `RUNPATH_FILE` are relative to `ert/model/`.
+- the job `EXECUTABLE` is relative to `ert/bin/jobs/RUN_COUPLED`.
+- `GEN_KW` writes `q0_mult.txt` into each realization runpath.
+- launch ERT with its venv on `PATH` so `fm_dispatch.py` is available.
+- use `ert test_run` as the real parse/execution gate; `ert lint` alone is not
+  sufficient for this ERT version.

@@ -3,39 +3,33 @@
   "role": "master",
   "deck": "MASTER.DATA",
   "network": {
-    "manifold_pressure_bar": 40.0,
+    "outlet_pressure_bar": 40.0,
     "fluid_density_kg_m3": 850.0,
-    "friction_a_bar_sm3d": 0.004,
-    "friction_b_bar_sm3d2": 1.5e-5
+    "trunk_friction_a_bar_sm3d": 0.001,
+    "trunk_friction_b_bar_sm3d2": 1e-6,
+    "branch_friction_a_bar_sm3d": 0.002,
+    "branch_friction_b_bar_sm3d2": 3e-6
   },
   "wells": [
     {
       "name": "N-P1",
       "slave": "model_n",
-      "md_m": 3100.0,
-      "gor_sm3_sm3": 120.0,
-      "gsat_base": 0.30
+      "tvd_m": 3100.0
     },
     {
       "name": "N-P2",
       "slave": "model_n",
-      "md_m": 3350.0,
-      "gor_sm3_sm3": 120.0,
-      "gsat_base": 0.32
+      "tvd_m": 3350.0
     },
     {
       "name": "H-P1",
       "slave": "model_hdn",
-      "md_m": 2900.0,
-      "gor_sm3_sm3": 120.0,
-      "gsat_base": 0.31
+      "tvd_m": 2900.0
     },
     {
       "name": "H-P2",
       "slave": "model_hdn",
-      "md_m": 3050.0,
-      "gor_sm3_sm3": 120.0,
-      "gsat_base": 0.33
+      "tvd_m": 3050.0
     }
   ]
 }

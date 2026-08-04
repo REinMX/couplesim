@@ -78,11 +78,18 @@ COMPDAT
   'M-P1' 2 2 1 3 'OPEN' 1* 1* 0.3 /
 /
 -- ---------------------------------------------------------------------------
--- The subsea network. In the real setup the slave wells (N-P1/N-P2 for
--- model_n, H-P1/H-P2 for model_hdn) flow through this network instead of
--- being constrained directly. Illustrative NETWORK block -- replace with
--- the network section of your real master model (nodes, branches, well
--- connections; exact keywords follow the Eclipse NETWORK manual).
+-- Prescribed production profiles are INPUTS TO this master/network model.
+-- They represent external subsea wells that are not simulated in model_n or
+-- model_hdn. The row layout is illustrative: replace it with the exact
+-- GSATPROD/GSATPTAB syntax used by your Eclipse version and current deck.
+-- ---------------------------------------------------------------------------
+INCLUDE
+  'profiles/gsatprod_external.inc' /
+-- ---------------------------------------------------------------------------
+-- The subsea network receives those prescribed profiles PLUS dynamic rates
+-- from model_n and model_hdn. This NETWORK block is only a structural sketch;
+-- replace it with the nodes, branches, well connections and controls from
+-- your real master model.
 -- ---------------------------------------------------------------------------
 INCLUDE
   'network/network.inc' /
