@@ -128,7 +128,9 @@ def run_dummy(model: str, runpath: Path, iteration: int) -> None:
     )
 
 
-def read_slave_rates(coupling_dir: Path, model: str) -> dict[str, dict[int, float]]:
+def read_slave_rates(
+    coupling_dir: Path, model: str, *, field: str = "q_liq_sm3d"
+) -> dict[str, dict[int, float]]:
     path = coupling_dir / f"slave_rates_{model}.csv"
     if not path.exists():
         raise FileNotFoundError(f"slave simulation did not produce required rates: {path}")
@@ -142,10 +144,12 @@ def read_slave_rates(coupling_dir: Path, model: str) -> dict[str, dict[int, floa
         year = int(row["year"])
         if year in rates.setdefault(well, {}):
             raise ValueError(f"duplicate slave rate row for {model}/{well}/{year}")
-        rate = float(row["q_liq_sm3d"])
+        if field not in row or row[field] in (None, ""):
+            raise ValueError(f"slave rates file is missing {field} for {model}/{well}/{year}")
+        rate = float(row[field])
         if not math.isfinite(rate) or rate < 0.0:
             raise ValueError(
-                f"slave rate must be finite and non-negative for "
+                f"{field} must be finite and non-negative for "
                 f"{model}/{well}/{year}: {rate}"
             )
         rates[well][year] = rate
@@ -190,6 +194,8 @@ def validate_topology(coupling: dict[str, Any]) -> None:
         raise ValueError("coupling.relaxation must be in (0, 1]")
 
     master = coupling["master"]["model"]
+    if master != "master_network":
+        raise ValueError("master model must be 'master_network'")
     if master in coupling["slaves"]:
         raise ValueError("master model cannot also be configured as a slave")
     if set(coupling["slaves"]) != {"model_n", "model_hdn"}:
@@ -361,9 +367,15 @@ def main() -> int:
         difference = 0.0
         for name in slaves:
             current_rates[name] = read_slave_rates(coupling_dir, name)
-            difference = max(difference, max_rel_diff(previous_rates[name], current_rates[name]))
+            fixed_point_rates = read_slave_rates(
+                coupling_dir, name, field="q_ipr_sm3d"
+            )
+            difference = max(
+                difference,
+                max_rel_diff(previous_rates[name], fixed_point_rates),
+            )
         history.append([iteration, round(difference, 9)])
-        log(f"iteration {iteration}: max relative slave-rate change = {difference:.4%}")
+        log(f"iteration {iteration}: max relative fixed-point residual = {difference:.4%}")
         if difference <= tolerance:
             converged = True
             break
@@ -371,7 +383,7 @@ def main() -> int:
 
     with (coupling_dir / "convergence_history.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["iteration", "max_rel_diff"])
+        writer.writerow(["iteration", "max_fixed_point_residual"])
         writer.writerows(history)
 
     report = write_report(runpath, coupling, q0_mult, history, converged)

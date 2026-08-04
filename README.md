@@ -61,9 +61,12 @@ fixed-point loop:
    - `coupling/network_constraints_model_hdn.csv`.
 4. Both slaves simulate against their network BHP constraints and overwrite
    their `slave_rates_*.csv` results.
-5. Repeat until the maximum relative rate change is below the configured
-   tolerance. A non-converged run exits nonzero so ERT cannot silently accept
-   a partial result.
+5. Repeat until the maximum relative **unrelaxed fixed-point residual**—the
+   difference between the rates supplied to the network and the slaves' raw
+   IPR target rates—is below the configured tolerance. This criterion is
+   independent of the relaxation factor, so tiny relaxation cannot create
+   false convergence. A non-converged run exits nonzero so ERT cannot silently
+   accept a partial result.
 
 The dummy uses annual 2024–2026 report steps, a linear IPR for each slave well,
 shared trunk pressure loss based on **total liquid network rate**, per-well
@@ -184,7 +187,10 @@ It verifies that:
 - malformed or incomplete prescribed-profile coverage is rejected;
 - non-finite profile, exchange, model, and ERT parameter values are rejected;
 - profile keywords not implemented by the dummy parser are rejected;
-- invalid coupling controls are rejected before runpath changes;
+- invalid coupling controls and unsafe model identifiers are rejected before
+  runpath changes;
+- convergence uses the unrelaxed fixed-point residual, so tiny relaxation
+  cannot create false convergence;
 - missing or malformed ERT parameters are not silently defaulted;
 - non-convergence fails the forward model; and
 - the report states all three network-input categories.
@@ -206,7 +212,8 @@ Verification on ERT 23.0.1:
 
 - `ert test_run`: 1/1 realization passed;
 - `ert ensemble_experiment`: 2/2 realizations passed;
-- both realizations converged in 8/12 coupling iterations; and
+- realization 0 converged in 9/12 iterations and realization 1 in 8/12,
+  using the unrelaxed fixed-point residual; and
 - sampled `Q0_MULT` values `0.836549` and `0.999312` propagated through both
   reservoir slaves while the prescribed external profile remained unchanged.
 

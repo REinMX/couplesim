@@ -142,6 +142,68 @@ class FailureHandlingTest(unittest.TestCase):
             self.assertIn("maximum iterations reached without convergence", completed.stderr)
             self.assertIn("converged=False", (runpath / "COUPLED_REPORT.txt").read_text(encoding="utf-8"))
 
+    def test_tiny_relaxation_does_not_create_false_convergence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            config = json.loads((ROOT / "coupling.json").read_text(encoding="utf-8"))
+            config["coupling"]["relaxation"] = 1.0e-6
+            config["coupling"]["max_iterations"] = 2
+            config_path = temp / "tiny-relaxation.json"
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            runpath = temp / "run"
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(DRIVER),
+                    "--demo",
+                    "--runpath",
+                    str(runpath),
+                    "--config",
+                    str(config_path),
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn("maximum iterations reached without convergence", completed.stderr)
+            self.assertIn(
+                "converged=False",
+                (runpath / "COUPLED_REPORT.txt").read_text(encoding="utf-8"),
+            )
+
+    def test_unsafe_master_identifier_is_rejected_without_runpath_damage(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            config = json.loads((ROOT / "coupling.json").read_text(encoding="utf-8"))
+            config["master"]["model"] = "."
+            config_path = temp / "unsafe-master.json"
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            runpath = temp / "valuable-existing-directory"
+            runpath.mkdir()
+            sentinel = runpath / "sentinel.txt"
+            sentinel.write_text("preserve me\n", encoding="utf-8")
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(DRIVER),
+                    "--demo",
+                    "--runpath",
+                    str(runpath),
+                    "--config",
+                    str(config_path),
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("master model must be 'master_network'", completed.stderr)
+            self.assertTrue(sentinel.is_file())
+            self.assertEqual(set(runpath.iterdir()), {sentinel})
+
     def test_invalid_zero_relaxation_is_rejected_before_runpath_changes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)
