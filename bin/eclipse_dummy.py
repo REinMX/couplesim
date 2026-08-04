@@ -5,16 +5,17 @@ Plays the role of the reservoir simulator (eclipse100 / flow) for the
 three models of the coupled setup:
 
   master_network -- "dummy reservoir with the network model". Reads the
-                    rate demands of the coupled slave wells, solves a
-                    simple subsea network (manifold pressure + riser
-                    friction + hydrostatics) and writes GSATPROD
-                    production-profile tables for each coupled slave.
+                    rate demands of the coupled slave wells (from their
+                    simulation results), solves a simple subsea network
+                    (manifold pressure + riser friction + hydrostatics)
+                    and writes GSATPROD production-profile tables for each
+                    coupled slave.
   model_n        -- coupled slave. Consumes the GSATPROD table written by
                     master_network, applies a linear inflow-performance
                     (IPR) constraint and reports back the actual rates.
-  model_hdn      -- static slave. Consumes the static GSATPROD table from
-                    input/static_profiles/ (the "as today" mode), same IPR
-                    logic, and reports rates into the shared coupling dir.
+  model_hdn      -- coupled slave (same mechanism as model_n). A static
+                    mode (old GSATPROD file, no network feedback) is kept
+                    for any model via mode=static in coupling.json.
 
 The dummy does NOT parse the .DATA decks. Each model's machine-readable
 specification lives in simspec.json inside its staging folder; the .DATA
@@ -174,7 +175,9 @@ def run_slave(spec: dict, model_dir: Path) -> None:
     for r in rows:
         w = wells[r["well"]]
         p_bhp_net = r["p_bhp"]
-        denom = p_res[r["well"]] - w["p_bhp0_bar"]
+        # Linear IPR with constant productivity index:
+        #   J = q0 / (p_res0 - p_bhp0),  q_ipr = J * (p_res - p_bhp)
+        denom = w["p_res0_bar"] - w["p_bhp0_bar"]
         q_ipr = w["q0_sm3d"] * (p_res[r["well"]] - p_bhp_net) / denom if denom > 0 else w["q0_sm3d"]
         q_ipr = max(0.0, q_ipr)
         q_out = min(r["q_liq"], q_ipr)

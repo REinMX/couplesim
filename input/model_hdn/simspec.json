@@ -1,7 +1,7 @@
 {
   "model": "model_hdn",
   "role": "slave",
-  "mode": "static",
+  "mode": "coupled",
   "deck": "MODEL_HDN.DATA",
   "wells": [
     {

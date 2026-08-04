@@ -8,38 +8,47 @@ of your existing setups, **without needing an Eclipse licence**.
                  ┌───────────────────────────────────┐
                  │  master_network  (master, dummy)  │
                  │  reservoir + subsea NETWORK model │
-                 └────────────────┬──────────────────┘
-                                  │ GSATPROD tables written per coupling
-                                  │ iteration: coupling/gsatprod_model_n.inc
-                                  ▼
-                 ┌───────────────────────────────────┐     ┌──────────────────────────────────┐
-                 │  model_n  (coupled slave)         │     │  model_hdn  (static slave)       │
-                 │  subsea wells N-P1, N-P2          │     │  subsea wells H-P1, H-P2         │
-                 │  profiles come from the network   │     │  profiles stay in GSATPROD file  │
-                 └────────────────┬──────────────────┘     └────────────────┬─────────────────┘
-                                  │ actual rates back:                      │ static profile:
-                                  │ coupling/slave_rates_model_n.csv        │ input/static_profiles/
-                                  └─────────────── loop until converged ◀───┘
+                 └──────────────┬────────────────────┘
+                                │ GSATPROD tables written per coupling
+                                │ iteration, for BOTH slaves:
+                                │ coupling/gsatprod_model_n.inc
+                                │ coupling/gsatprod_model_hdn.inc
+              ┌─────────────────┴──────────────────┐
+              ▼                                    ▼
+ ┌───────────────────────────┐      ┌───────────────────────────┐
+ │  model_n  (coupled slave) │      │  model_hdn (coupled slave)│
+ │  subsea wells N-P1, N-P2  │      │  subsea wells H-P1, H-P2  │
+ └─────────────┬─────────────┘      └─────────────┬─────────────┘
+               │ actual rates from simulation      │ actual rates from simulation
+               └──────────────► network ◄──────────┘
+                              (next iteration)
 ```
 
 | Model | Role | Production profiles |
 |---|---|---|
-| `master_network` | master — dummy reservoir + network model | solves the network (manifold pressure + riser friction + hydrostatics) |
+| `master_network` | master — dummy reservoir + network model | solves the network (manifold pressure + riser friction + hydrostatics) from the slaves' simulation results |
 | `model_n` | coupled slave | GSATPROD table **rewritten every coupling iteration** by the master |
-| `model_hdn` | static slave | GSATPROD table stays **static** (the "one model remains in gsatprod" mode) |
+| `model_hdn` | coupled slave | GSATPROD table **rewritten every coupling iteration** by the master |
+
+Both slaves feed their simulated rates (and the network's own profiles) back
+into the master, and receive fresh GSATPROD profiles from it, until the
+fixed-point iteration converges. A per-model `mode=static` toggle in
+`coupling.json` exists for the case where one model should keep its old
+static GSATPROD file (the "one model remains in gsatprod" scenario) — the
+static table is kept in `input/static_profiles/`.
 
 ## The coupling loop
 
 Each ERT realization runs the three models through one forward-model step,
 `RUN_COUPLED` (`ert/bin/scripts/run_coupled.py`):
 
-1. **Master** reads the slave wells' demanded rates (previous iteration, or
-   the initial guess in `coupling.json`), solves the network and writes a
-   `GSATPROD` production-profile table for each **coupled** slave:
-   `coupling/gsatprod_model_n.inc`.
-2. **Slaves** simulate with their GSATPROD table (coupled = the one just
-   written; static = the file copied from `input/static_profiles/`) and
-   report their actual rates back: `coupling/slave_rates_<model>.csv`.
+1. **Master** reads the slave wells' demanded rates (previous iteration —
+   i.e. the slaves' own simulation results — or the initial guess in
+   `coupling.json`), solves the network and writes a `GSATPROD`
+   production-profile table for **each coupled slave**:
+   `coupling/gsatprod_model_n.inc` and `coupling/gsatprod_model_hdn.inc`.
+2. **Slaves** simulate with their GSATPROD table (the one just written)
+   and report their actual rates back: `coupling/slave_rates_<model>.csv`.
 3. **Convergence check**: max relative change of the coupled slaves' rates
    vs the previous iteration. Below `coupling.tolerance` → converged;
    otherwise iterate (up to `coupling.max_iterations`).
@@ -66,7 +75,7 @@ coupled-sim-eclipse/
 ├── input/
 │   ├── master_network/        # MASTER.DATA + network/ + simspec.json
 │   ├── model_n/               # MODEL_N.DATA + simspec.json (coupled slave)
-│   ├── model_hdn/             # MODEL_HDN.DATA + simspec.json (static slave)
+│   ├── model_hdn/             # MODEL_HDN.DATA + simspec.json (coupled slave)
 │   ├── static_profiles/       # gsatprod_model_hdn.inc (static GSATPROD table)
 │   ├── templates/q0_mult.tmpl # GEN_KW template
 │   └── distributions/         # GEN_KW priors (UNIFORM 0.8 1.2)
@@ -165,4 +174,4 @@ The "simulators" are `bin/eclipse_dummy.py` invocations inside
 | `bin/eclipse_dummy.py` | licence-free stand-in for eclipse100/flow; reads `simspec.json` |
 | `ert/model/01_coupled.ert` | ERT config (runpath layout, GEN_KW, INSTALL_JOB, FORWARD_MODEL) |
 | `input/*/simspec.json` | machine-readable model specs for the dummy simulators |
-| `input/static_profiles/gsatprod_model_hdn.inc` | the static GSATPROD table ("as today") |
+| `input/static_profiles/gsatprod_model_hdn.inc` | optional static GSATPROD table (used only if a model is set to `mode=static` in coupling.json) |

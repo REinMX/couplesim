@@ -1,7 +1,10 @@
 GSATPROD
--- Static production profiles for model_hdn subsea wells (the setup as
--- used today). Copied by bin/run_coupled.py into the realization runpath
--- as coupling/gsatprod_model_hdn.inc.
+-- Optional static production profiles for model_hdn subsea wells, kept as
+-- the "as today" reference. Used ONLY when model_hdn is set to
+-- mode=static in coupling.json (then bin/run_coupled.py copies this file
+-- into the realization runpath as coupling/gsatprod_model_hdn.inc).
+-- In the default coupled mode, master_network rewrites coupling/gsatprod_model_hdn.inc
+-- at every coupling iteration instead.
 -- Format: WELL YEAR Q_LIQ_SM3D Q_GAS_SM3D P_WH_BAR P_BHP_BAR GSAT
 --  WELL      YEAR  Q_LIQ_SM3D  Q_GAS_SM3D  P_WH_BAR  P_BHP_BAR  GSAT
     'H-P1'    2024  180.0       21600.0     41.2      282.5      0.31 /

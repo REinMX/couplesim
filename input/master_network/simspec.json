@@ -22,6 +22,20 @@
       "md_m": 3350.0,
       "gor_sm3_sm3": 120.0,
       "gsat_base": 0.32
+    },
+    {
+      "name": "H-P1",
+      "slave": "model_hdn",
+      "md_m": 2900.0,
+      "gor_sm3_sm3": 120.0,
+      "gsat_base": 0.31
+    },
+    {
+      "name": "H-P2",
+      "slave": "model_hdn",
+      "md_m": 3050.0,
+      "gor_sm3_sm3": 120.0,
+      "gsat_base": 0.33
     }
   ]
 }

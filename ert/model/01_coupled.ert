@@ -6,7 +6,8 @@
 --     master_network  dummy reservoir + subsea network model   (master)
 --     model_n         subsea wells, GSATPROD profiles from the network
 --                     (coupled slave)
---     model_hdn       subsea wells, static GSATPROD profiles   (static slave)
+--     model_hdn       subsea wells, GSATPROD profiles from the network
+--                     (coupled slave; static mode available via coupling.json)
 --
 -- The coupling loop (master -> GSATPROD tables -> slaves -> rates ->
 -- converge) lives in bin/run_coupled.py. The "simulators" are stand-ins

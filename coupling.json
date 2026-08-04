@@ -11,7 +11,9 @@
   },
   "initial_rates_sm3d": {
     "N-P1": 500.0,
-    "N-P2": 600.0
+    "N-P2": 600.0,
+    "H-P1": 400.0,
+    "H-P2": 450.0
   },
   "master": {
     "model": "master_network",
@@ -23,9 +25,8 @@
       "deck": "MODEL_N.DATA"
     },
     "model_hdn": {
-      "mode": "static",
-      "deck": "MODEL_HDN.DATA",
-      "static_profile": "input/static_profiles/gsatprod_model_hdn.inc"
+      "mode": "coupled",
+      "deck": "MODEL_HDN.DATA"
     }
   }
 }

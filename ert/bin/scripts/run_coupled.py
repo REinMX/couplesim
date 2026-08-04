@@ -5,13 +5,15 @@ One ERT realization runs THREE reservoir models "at the same time":
 
   master_network -- dummy reservoir with the subsea network model
   model_n        -- coupled slave (GSATPROD profiles from master_network)
-  model_hdn      -- static slave (GSATPROD profiles from file, as today)
+  model_hdn      -- coupled slave (GSATPROD profiles from master_network;
+                    a static mode is available per model via coupling.json)
 
 Coupling loop (fixed-point iteration on well rates):
 
     for iteration in 1..max_iterations:
-        1. master_network reads the slave wells' demanded rates and solves
-           the network -> writes GSATPROD tables for each coupled slave
+        1. master_network reads the slave wells' demanded rates (from the
+           slaves' simulation results) and solves the network -> writes
+           GSATPROD tables for each coupled slave
         2. each slave simulates with its GSATPROD table -> reports actual
            rates back to coupling/
         3. convergence check: max relative change of coupled-slave rates
@@ -141,6 +143,8 @@ def main() -> None:
     else:
         runpath = Path.cwd()
     runpath.mkdir(parents=True, exist_ok=True)
+    # fresh coupling dir: repeated demo runs must not pick up stale CSVs
+    shutil.rmtree(runpath / "coupling", ignore_errors=True)
     (runpath / "coupling").mkdir(parents=True, exist_ok=True)
 
     q0_mult = parse_q0_mult(runpath)

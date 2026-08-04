@@ -1,10 +1,12 @@
 -- ============================================================================
 -- MODEL_HDN.DATA -- ILLUSTRATIVE deck for the coupled-simulation example.
 --
--- Role: static slave. Subsea wells H-P1/H-P2. Unlike model_n, the
--- production profiles are NOT coupled: they remain the static GSATPROD
--- table shipped with the input (input/static_profiles/), i.e. the setup
--- "as today".
+-- Role: coupled slave (like model_n). Subsea wells H-P1/H-P2, whose
+-- production profiles are NOT specified here: they are written by
+-- master_network at every coupling iteration as GSATPROD tables (see
+-- INCLUDE below). The static table that was used "as today" is kept at
+-- input/static_profiles/gsatprod_model_hdn.inc -- switch model_hdn back to
+-- mode=static in coupling.json if you want the old behaviour for one model.
 --
 -- !!! This deck is NOT executed by the example (no Eclipse licence needed).
 --     The dummy simulator (bin/eclipse_dummy.py) reads simspec.json next
@@ -81,9 +83,12 @@ COMPDAT
   'H-P2' 3 4 1 3 'OPEN' 1* 1* 0.3 /
 /
 -- ---------------------------------------------------------------------------
--- Coupling interface: static GSATPROD production profiles (the "one model
--- remains in gsatprod" mode). The file is copied into the runpath by
--- bin/run_coupled.py from input/static_profiles/ and is never rewritten.
+-- Coupling interface: GSATPROD production profiles for the subsea wells.
+-- In the coupled setup this file is REWRITTEN by master_network at every
+-- coupling iteration (see ert/bin/scripts/run_coupled.py); a real Eclipse
+-- run consumes the GSATPROD keyword directly. If your setup uses GSATPTAB
+-- instead, keep the same mechanism and just write the table in that
+-- keyword's format.
 -- ---------------------------------------------------------------------------
 INCLUDE
   'coupling/gsatprod_model_hdn.inc' /
