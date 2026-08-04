@@ -169,6 +169,61 @@ class FailureHandlingTest(unittest.TestCase):
             self.assertIn("relaxation must be in (0, 1]", completed.stderr)
             self.assertFalse(runpath.exists())
 
+    def test_missing_ert_parameter_is_rejected_outside_demo_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runpath = Path(temp_dir) / "run"
+            completed = subprocess.run(
+                [sys.executable, str(DRIVER), "--runpath", str(runpath)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("required ERT parameter file is missing", completed.stderr)
+
+    def test_non_finite_ert_parameter_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runpath = Path(temp_dir) / "run"
+            runpath.mkdir()
+            (runpath / "q0_mult.txt").write_text("Q0_MULT NaN\n", encoding="utf-8")
+            completed = subprocess.run(
+                [sys.executable, str(DRIVER), "--runpath", str(runpath)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("finite positive Q0_MULT", completed.stderr)
+
+    def test_dummy_rejects_unimplemented_gsatptab_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            config = json.loads((ROOT / "coupling.json").read_text(encoding="utf-8"))
+            config["prescribed_network_profiles"]["external_satellite"]["keyword"] = "GSATPTAB"
+            config_path = temp / "gsatptab.json"
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            runpath = temp / "run"
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(DRIVER),
+                    "--demo",
+                    "--runpath",
+                    str(runpath),
+                    "--config",
+                    str(config_path),
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("dummy supports only GSATPROD", completed.stderr)
+            self.assertFalse(runpath.exists())
+
     def test_malformed_ert_parameter_is_not_silently_defaulted(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             runpath = Path(temp_dir) / "run"

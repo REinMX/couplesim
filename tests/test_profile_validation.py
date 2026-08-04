@@ -45,6 +45,21 @@ class PrescribedProfileValidationTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "incomplete coverage"):
             DUMMY.validate_prescribed_profile_rows(rows, {2024, 2025}, "external_satellite")
 
+    def test_missing_gsatprod_header_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "GSATPROD header"):
+            self.parse("'EXT-P1' 2024 100 1000 40 280 0.3 /\n/\n")
+
+    def test_non_finite_external_rate_is_rejected(self) -> None:
+        rows = self.parse(
+            """GSATPROD
+'EXT-P1' 2024 NaN 1000 40 280 0.3 /
+'EXT-P1' 2025 90 900 40 280 0.3 /
+/
+"""
+        )
+        with self.assertRaisesRegex(ValueError, "finite"):
+            DUMMY.validate_prescribed_profile_rows(rows, {2024, 2025}, "external_satellite")
+
 
 if __name__ == "__main__":
     unittest.main()

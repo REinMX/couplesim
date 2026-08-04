@@ -61,11 +61,13 @@ def schedule_years(coupling: dict[str, Any]) -> list[int]:
     return list(range(first_year, first_year + count))
 
 
-def parse_q0_mult(runpath: Path) -> float:
-    """Read ERT's GEN_KW result; absence means standalone default 1.0."""
+def parse_q0_mult(runpath: Path, *, allow_default: bool) -> float:
+    """Read ERT's GEN_KW result; explicit demo mode may default to 1.0."""
     path = runpath / "q0_mult.txt"
     if not path.exists():
-        return 1.0
+        if allow_default:
+            return 1.0
+        raise FileNotFoundError(f"required ERT parameter file is missing: {path}")
     values: list[float] = []
     for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
@@ -75,8 +77,10 @@ def parse_q0_mult(runpath: Path) -> float:
             values.append(float(line.split()[-1]))
         except ValueError as exc:
             raise ValueError(f"invalid Q0_MULT result row in {path}: {raw}") from exc
-    if len(values) != 1 or values[0] <= 0.0:
-        raise ValueError(f"expected exactly one positive Q0_MULT value in {path}, found {values}")
+    if len(values) != 1 or not math.isfinite(values[0]) or values[0] <= 0.0:
+        raise ValueError(
+            f"expected exactly one finite positive Q0_MULT value in {path}, found {values}"
+        )
     return values[0]
 
 
@@ -100,8 +104,14 @@ def apply_q0_mult(runpath: Path, model: str, multiplier: float) -> None:
     if not wells:
         raise ValueError(f"slave model has no wells: {model}")
     for well in wells:
-        well["q0_sm3d"] = round(float(well["q0_sm3d"]) * multiplier, 6)
-    path.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
+        base_q0 = float(well["q0_sm3d"])
+        if not math.isfinite(base_q0) or base_q0 < 0.0:
+            raise ValueError(f"q0_sm3d must be finite and non-negative for {model}/{well['name']}")
+        scaled_q0 = base_q0 * multiplier
+        if not math.isfinite(scaled_q0):
+            raise ValueError(f"scaled q0_sm3d is non-finite for {model}/{well['name']}")
+        well["q0_sm3d"] = round(scaled_q0, 6)
+    path.write_text(json.dumps(spec, indent=2, allow_nan=False) + "\n", encoding="utf-8")
 
 
 def run_dummy(model: str, runpath: Path, iteration: int) -> None:
@@ -133,8 +143,11 @@ def read_slave_rates(coupling_dir: Path, model: str) -> dict[str, dict[int, floa
         if year in rates.setdefault(well, {}):
             raise ValueError(f"duplicate slave rate row for {model}/{well}/{year}")
         rate = float(row["q_liq_sm3d"])
-        if rate < 0.0:
-            raise ValueError(f"negative slave rate for {model}/{well}/{year}: {rate}")
+        if not math.isfinite(rate) or rate < 0.0:
+            raise ValueError(
+                f"slave rate must be finite and non-negative for "
+                f"{model}/{well}/{year}: {rate}"
+            )
         rates[well][year] = rate
     return rates
 
@@ -185,8 +198,11 @@ def validate_topology(coupling: dict[str, Any]) -> None:
         raise ValueError("at least one prescribed network profile is required")
     profile_prefix = Path("input") / master
     for name, profile in coupling["prescribed_network_profiles"].items():
-        if profile.get("keyword") not in {"GSATPROD", "GSATPTAB"}:
-            raise ValueError(f"unsupported prescribed profile keyword for {name}: {profile.get('keyword')!r}")
+        if profile.get("keyword") != "GSATPROD":
+            raise ValueError(
+                f"dummy supports only GSATPROD prescribed profiles; "
+                f"{name} uses {profile.get('keyword')!r}"
+            )
         configured_path = Path(profile["path"])
         if configured_path.is_absolute() or ".." in configured_path.parts:
             raise ValueError(f"prescribed profile path must be repository-relative: {configured_path}")
@@ -223,12 +239,15 @@ def initial_rate_rows(
         if name not in initial:
             raise ValueError(f"missing initial rate for {model}/{name}")
         rate = float(initial[name])
-        if rate < 0.0:
-            raise ValueError(f"negative initial rate for {model}/{name}")
+        if not math.isfinite(rate) or rate < 0.0:
+            raise ValueError(f"initial rate must be finite and non-negative for {model}/{name}: {rate}")
+        gor = float(well["gor_sm3_sm3"])
+        if not math.isfinite(gor) or gor < 0.0:
+            raise ValueError(f"GOR must be finite and non-negative for {model}/{name}: {gor}")
         rates[name] = {}
         for year in years:
             rates[name][year] = rate
-            rows.append([name, year, rate, rate * float(well["gor_sm3_sm3"]), "initial_guess"])
+            rows.append([name, year, rate, rate * gor, "initial_guess"])
     path = runpath / "coupling" / f"slave_rates_{model}.csv"
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
@@ -265,7 +284,7 @@ def write_report(
         f"(converged={converged}, tol={coupling['coupling']['tolerance']})",
         "",
         "Network input contract:",
-        "  prescribed GSATPROD/GSATPTAB profiles -> master_network",
+        "  prescribed production profiles       -> master_network",
         "  model_n simulation results            -> master_network",
         "  model_hdn simulation results          -> master_network",
         "  master network pressure constraints   -> both slaves",
@@ -297,11 +316,12 @@ def main() -> int:
 
     if args.runpath:
         runpath = Path(args.runpath).resolve()
-    elif args.demo or not (Path.cwd() / "q0_mult.txt").exists():
+    elif args.demo:
         runpath = ROOT / "output" / "demo" / "realization-0"
     else:
         runpath = Path.cwd()
     validate_runpath(runpath)
+    q0_mult = parse_q0_mult(runpath, allow_default=args.demo)
     runpath.mkdir(parents=True, exist_ok=True)
 
     coupling_dir = runpath / "coupling"
@@ -309,11 +329,10 @@ def main() -> int:
         shutil.rmtree(coupling_dir)
     coupling_dir.mkdir(parents=True)
 
-    q0_mult = parse_q0_mult(runpath)
-    if not (runpath / "q0_mult.txt").exists():
+    if args.demo and not (runpath / "q0_mult.txt").exists():
         (runpath / "q0_mult.txt").write_text(f"Q0_MULT  {q0_mult:.6f}\n", encoding="utf-8")
     (runpath / "coupling_config.json").write_text(
-        json.dumps(coupling, indent=2) + "\n", encoding="utf-8"
+        json.dumps(coupling, indent=2, allow_nan=False) + "\n", encoding="utf-8"
     )
     log(f"runpath: {runpath}   q0_mult: {q0_mult}")
 

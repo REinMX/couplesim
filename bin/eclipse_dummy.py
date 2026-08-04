@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import sys
 from datetime import date
 from pathlib import Path
@@ -66,10 +67,18 @@ def schedule_years(coupling: dict[str, Any]) -> list[int]:
 def parse_gsatprod_inc(path: Path) -> list[dict[str, Any]]:
     """Parse the example's illustrative GSATPROD row convention strictly."""
     rows: list[dict[str, Any]] = []
+    saw_header = False
     for line_number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         line = raw.strip()
-        if not line or line.startswith("--") or line == "GSATPROD" or line == "/":
+        if not line or line.startswith("--"):
             continue
+        if line == "GSATPROD":
+            saw_header = True
+            continue
+        if line == "/":
+            continue
+        if not saw_header:
+            raise ValueError(f"missing GSATPROD header before data at {path}:{line_number}")
         tokens = [token.strip("'\"") for token in line.split() if token != "/"]
         if len(tokens) != 7:
             raise ValueError(f"malformed GSATPROD example row at {path}:{line_number}: {raw}")
@@ -87,6 +96,8 @@ def parse_gsatprod_inc(path: Path) -> list[dict[str, Any]]:
             )
         except ValueError as exc:
             raise ValueError(f"invalid GSATPROD value at {path}:{line_number}: {raw}") from exc
+    if not saw_header:
+        raise ValueError(f"missing GSATPROD header in {path}")
     if not rows:
         raise ValueError(f"no GSATPROD rows found in {path}")
     return rows
@@ -106,8 +117,18 @@ def validate_rows(
         raise ValueError(f"{label} has incomplete coverage; missing={missing}, extra={extra}")
     for row in rows:
         rate = float(row["q_liq_sm3d"])
-        if rate < 0.0:
-            raise ValueError(f"{label} contains a negative liquid rate for {row['well']}/{row['year']}")
+        if not math.isfinite(rate) or rate < 0.0:
+            raise ValueError(
+                f"{label} requires a finite non-negative liquid rate for "
+                f"{row['well']}/{row['year']}: {rate}"
+            )
+        if "q_gas_sm3d" in row:
+            gas_rate = float(row["q_gas_sm3d"])
+            if not math.isfinite(gas_rate) or gas_rate < 0.0:
+                raise ValueError(
+                    f"{label} requires a finite non-negative gas rate for "
+                    f"{row['well']}/{row['year']}: {gas_rate}"
+                )
 
 
 def validate_prescribed_profile_rows(
@@ -117,6 +138,19 @@ def validate_prescribed_profile_rows(
     if not wells:
         raise ValueError(f"prescribed profile {label} contains no wells")
     validate_rows(rows, wells, expected_years, f"prescribed profile {label}")
+    for row in rows:
+        for field in ("p_wh_bar", "p_bhp_bar", "gsat"):
+            value = float(row[field])
+            if not math.isfinite(value):
+                raise ValueError(
+                    f"prescribed profile {label} requires finite {field} for "
+                    f"{row['well']}/{row['year']}: {value}"
+                )
+        if not 0.0 <= float(row["gsat"]) <= 1.0:
+            raise ValueError(
+                f"prescribed profile {label} requires GSAT in [0, 1] for "
+                f"{row['well']}/{row['year']}"
+            )
 
 
 def slave_rate_rows(path: Path) -> list[dict[str, Any]]:
@@ -227,7 +261,9 @@ def run_master(
         "totals_by_year": totals_by_year,
     }
     request_path = exchange_dir / f"network_request_iteration_{iteration:03d}.json"
-    request_path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
+    request_path.write_text(
+        json.dumps(request, indent=2, allow_nan=False) + "\n", encoding="utf-8"
+    )
 
     constraints_by_slave: dict[str, list[dict[str, Any]]] = {slave: [] for slave in by_slave}
     response_rows: list[dict[str, Any]] = []
@@ -248,6 +284,10 @@ def run_master(
                 )
                 hydrostatic = float(network["fluid_density_kg_m3"]) * GRAVITY * float(well["tvd_m"]) * 1e-5
                 p_bhp = p_wh + hydrostatic
+                if not all(math.isfinite(value) for value in (manifold_pressure, p_wh, p_bhp)):
+                    raise ValueError(
+                        f"network calculation produced non-finite pressure for {well['name']}/{year}"
+                    )
                 row = {
                     "well": well["name"],
                     "year": year,
@@ -282,7 +322,7 @@ def run_master(
 
     response = {"iteration": iteration, "constraints": response_rows}
     (exchange_dir / f"network_response_iteration_{iteration:03d}.json").write_text(
-        json.dumps(response, indent=2) + "\n", encoding="utf-8"
+        json.dumps(response, indent=2, allow_nan=False) + "\n", encoding="utf-8"
     )
     report = [
         f"master_network report - iteration {iteration}",
@@ -315,6 +355,13 @@ def run_slave(
         }
         for row in constraints
     ]
+    for constraint in typed_constraints:
+        for field in ("network_input_q_liq_sm3d", "total_network_q_liq_sm3d", "p_bhp_bar"):
+            if not math.isfinite(float(constraint[field])):
+                raise ValueError(
+                    f"network constraints for {spec['model']} require finite {field} for "
+                    f"{constraint['well']}/{constraint['year']}"
+                )
     wells = {well["name"]: well for well in spec["wells"]}
     validate_rows(
         [
@@ -336,14 +383,25 @@ def run_slave(
     report = [f"{spec['model']} report - iteration {iteration}", ""]
     for constraint in sorted(typed_constraints, key=lambda row: (row["well"], row["year"])):
         well = wells[constraint["well"]]
-        denominator = float(well["p_res0_bar"]) - float(well["p_bhp0_bar"])
+        p_res0 = float(well["p_res0_bar"])
+        p_bhp0 = float(well["p_bhp0_bar"])
+        q0 = float(well["q0_sm3d"])
+        gor = float(well["gor_sm3_sm3"])
+        depletion = float(well.get("depletion_bar_per_year", 3.0))
+        if not all(math.isfinite(value) for value in (p_res0, p_bhp0, q0, gor, depletion)):
+            raise ValueError(f"non-finite slave well specification for {constraint['well']}")
+        if q0 < 0.0 or gor < 0.0 or depletion < 0.0:
+            raise ValueError(f"negative q0, GOR, or depletion for {constraint['well']}")
+        denominator = p_res0 - p_bhp0
         if denominator <= 0.0:
             raise ValueError(f"invalid IPR reference pressures for {constraint['well']}")
-        productivity_index = float(well["q0_sm3d"]) / denominator
+        productivity_index = q0 / denominator
         q_ipr = max(0.0, productivity_index * (pressure[constraint["well"]] - constraint["p_bhp_bar"]))
         q_previous = constraint["network_input_q_liq_sm3d"]
         q_output = max(0.0, q_previous + relaxation * (q_ipr - q_previous))
-        gas_rate = q_output * float(well["gor_sm3_sm3"])
+        gas_rate = q_output * gor
+        if not all(math.isfinite(value) for value in (q_ipr, q_output, gas_rate)):
+            raise ValueError(f"slave calculation produced non-finite rates for {constraint['well']}")
         backpressure_limited = int(q_ipr < q_previous - 1e-9)
         output_rows.append(
             [
@@ -376,9 +434,11 @@ def run_slave(
             f"IPR={q_ipr:.2f}, relaxed output={q_output:.2f} sm3/d"
         )
         cumulative[constraint["well"]] += q_output * 365.0
-        pressure[constraint["well"]] -= float(well.get("depletion_bar_per_year", 3.0)) + 0.5 * (
+        pressure[constraint["well"]] -= depletion + 0.5 * (
             cumulative[constraint["well"]] / 1.0e6
         )
+        if not math.isfinite(pressure[constraint["well"]]):
+            raise ValueError(f"non-finite reservoir pressure for {constraint['well']}")
 
     header = [
         "well",
@@ -395,7 +455,12 @@ def run_slave(
     write_csv(coupling_dir / f"slave_rates_{spec['model']}.csv", header, output_rows)
     exchange_dir = coupling_dir / "exchange"
     (exchange_dir / f"slave_result_{spec['model']}_iteration_{iteration:03d}.json").write_text(
-        json.dumps({"iteration": iteration, "model": spec["model"], "rows": result_rows}, indent=2) + "\n",
+        json.dumps(
+            {"iteration": iteration, "model": spec["model"], "rows": result_rows},
+            indent=2,
+            allow_nan=False,
+        )
+        + "\n",
         encoding="utf-8",
     )
     (model_dir / f"slave_{spec['model']}_report.txt").write_text(

@@ -16,7 +16,7 @@ illustrative scaffolds, **not simulator-validated production decks**.
 
 ```text
  prescribed external profiles
- GSATPROD / GSATPTAB
+ GSATPROD-style input
  (EXT-P1, EXT-P2)
            │
            │ immutable rates every coupling iteration
@@ -182,8 +182,10 @@ It verifies that:
 - both slaves receive network constraints for 2024–2026;
 - shared manifold pressure uses prescribed plus simulated flow;
 - malformed or incomplete prescribed-profile coverage is rejected;
+- non-finite profile, exchange, model, and ERT parameter values are rejected;
+- profile keywords not implemented by the dummy parser are rejected;
 - invalid coupling controls are rejected before runpath changes;
-- malformed ERT parameters are not silently defaulted;
+- missing or malformed ERT parameters are not silently defaulted;
 - non-convergence fails the forward model; and
 - the report states all three network-input categories.
 
@@ -252,7 +254,7 @@ parser-valid.
 
 - annual schedule and report years;
 - fixed-point tolerance, maximum iterations, and relaxation;
-- prescribed network profile sources and keyword type;
+- prescribed GSATPROD profile sources;
 - initial slave-rate guesses;
 - the master model; and
 - both required coupled slaves.
