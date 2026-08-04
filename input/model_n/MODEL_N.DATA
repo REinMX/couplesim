@@ -1,0 +1,96 @@
+-- ============================================================================
+-- MODEL_N.DATA -- ILLUSTRATIVE deck for the coupled-simulation example.
+--
+-- Role: coupled slave. Subsea wells N-P1/N-P2, whose production profiles
+-- are NOT specified here: they are written by master_network at every
+-- coupling iteration as GSATPROD tables (see INCLUDE below).
+--
+-- !!! This deck is NOT executed by the example (no Eclipse licence needed).
+--     The dummy simulator (bin/eclipse_dummy.py) reads simspec.json next
+--     to this file instead. Replace this file with your real model_n deck
+--     from your FMU setup when going to production.
+-- ============================================================================
+RUNSPEC
+TITLE
+  COUPLED EXAMPLE - MODEL_N (COUPLED SLAVE, SUBSEA WELLS)
+DIMENS
+  5 5 3 /
+OIL
+WATER
+GAS
+DISGAS
+METRIC
+START
+  1 JAN 2024 /
+WELLDIMS
+  2 40 1 2 /
+UNIFOUT
+
+GRID
+DX
+  75*100 /
+DY
+  75*100 /
+DZ
+  75*10 /
+TOPS
+  25*2000 /
+PORO
+  75*0.25 /
+PERMX
+  75*300 /
+PERMY
+  75*300 /
+PERMZ
+  75*30 /
+
+PROPS
+PVTW
+  400.0 1.0 4.5E-5 0.9 5.0E-4 /
+ROCK
+  400.0 4.5E-5 /
+PVDO
+  300.0 1.10 1.20
+  400.0 1.00 1.00
+  500.0 0.90 0.80 /
+SWOF
+  0.20 0.0 1.0 0.0
+  0.40 0.1 0.6 0.0
+  0.60 0.5 0.2 0.0
+  0.80 1.0 0.0 0.0 /
+DENSITY
+  850.0 1000.0 0.7 /
+
+SOLUTION
+EQUIL
+  2010.0 400.0 2000.0 0.0 2000.0 0.0 /
+RSVD
+  2010.0 0.25
+  2010.0 0.25 /
+
+SCHEDULE
+RPTRST
+  BASIC=2 /
+WELSPECS
+  'N-P1' 'G1' 3 3 2010.0 'OIL' /
+  'N-P2' 'G1' 4 3 2010.0 'OIL' /
+/
+COMPDAT
+  'N-P1' 3 3 1 3 'OPEN' 1* 1* 0.3 /
+  'N-P2' 4 3 1 3 'OPEN' 1* 1* 0.3 /
+/
+-- ---------------------------------------------------------------------------
+-- Coupling interface: GSATPROD production profiles for the subsea wells.
+-- In the coupled setup this file is REWRITTEN by master_network at every
+-- coupling iteration (see bin/run_coupled.py); a real Eclipse run consumes
+-- the GSATPROD keyword directly. If your setup uses GSATPTAB instead, keep
+-- the same mechanism and just write the table in that keyword's format.
+-- ---------------------------------------------------------------------------
+INCLUDE
+  'coupling/gsatprod_model_n.inc' /
+WCONPROD
+  'N-P1' 'OPEN' 'ORAT' 500.0 4* 2500.0 /
+  'N-P2' 'OPEN' 'ORAT' 500.0 4* 2500.0 /
+/
+TSTEP
+  365.0 /

@@ -1,0 +1,27 @@
+{
+  "model": "master_network",
+  "role": "master",
+  "deck": "MASTER.DATA",
+  "network": {
+    "manifold_pressure_bar": 40.0,
+    "fluid_density_kg_m3": 850.0,
+    "friction_a_bar_sm3d": 0.004,
+    "friction_b_bar_sm3d2": 1.5e-5
+  },
+  "wells": [
+    {
+      "name": "N-P1",
+      "slave": "model_n",
+      "md_m": 3100.0,
+      "gor_sm3_sm3": 120.0,
+      "gsat_base": 0.30
+    },
+    {
+      "name": "N-P2",
+      "slave": "model_n",
+      "md_m": 3350.0,
+      "gor_sm3_sm3": 120.0,
+      "gsat_base": 0.32
+    }
+  ]
+}

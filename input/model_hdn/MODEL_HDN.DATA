@@ -1,0 +1,95 @@
+-- ============================================================================
+-- MODEL_HDN.DATA -- ILLUSTRATIVE deck for the coupled-simulation example.
+--
+-- Role: static slave. Subsea wells H-P1/H-P2. Unlike model_n, the
+-- production profiles are NOT coupled: they remain the static GSATPROD
+-- table shipped with the input (input/static_profiles/), i.e. the setup
+-- "as today".
+--
+-- !!! This deck is NOT executed by the example (no Eclipse licence needed).
+--     The dummy simulator (bin/eclipse_dummy.py) reads simspec.json next
+--     to this file instead. Replace this file with your real model_hdn
+--     deck from your FMU setup when going to production.
+-- ============================================================================
+RUNSPEC
+TITLE
+  COUPLED EXAMPLE - MODEL_HDN (STATIC SLAVE, SUBSEA WELLS)
+DIMENS
+  5 5 3 /
+OIL
+WATER
+GAS
+DISGAS
+METRIC
+START
+  1 JAN 2024 /
+WELLDIMS
+  2 40 1 2 /
+UNIFOUT
+
+GRID
+DX
+  75*100 /
+DY
+  75*100 /
+DZ
+  75*10 /
+TOPS
+  25*2000 /
+PORO
+  75*0.25 /
+PERMX
+  75*300 /
+PERMY
+  75*300 /
+PERMZ
+  75*30 /
+
+PROPS
+PVTW
+  400.0 1.0 4.5E-5 0.9 5.0E-4 /
+ROCK
+  400.0 4.5E-5 /
+PVDO
+  300.0 1.10 1.20
+  400.0 1.00 1.00
+  500.0 0.90 0.80 /
+SWOF
+  0.20 0.0 1.0 0.0
+  0.40 0.1 0.6 0.0
+  0.60 0.5 0.2 0.0
+  0.80 1.0 0.0 0.0 /
+DENSITY
+  850.0 1000.0 0.7 /
+
+SOLUTION
+EQUIL
+  2010.0 400.0 2000.0 0.0 2000.0 0.0 /
+RSVD
+  2010.0 0.25
+  2010.0 0.25 /
+
+SCHEDULE
+RPTRST
+  BASIC=2 /
+WELSPECS
+  'H-P1' 'G1' 2 3 2010.0 'OIL' /
+  'H-P2' 'G1' 3 4 2010.0 'OIL' /
+/
+COMPDAT
+  'H-P1' 2 3 1 3 'OPEN' 1* 1* 0.3 /
+  'H-P2' 3 4 1 3 'OPEN' 1* 1* 0.3 /
+/
+-- ---------------------------------------------------------------------------
+-- Coupling interface: static GSATPROD production profiles (the "one model
+-- remains in gsatprod" mode). The file is copied into the runpath by
+-- bin/run_coupled.py from input/static_profiles/ and is never rewritten.
+-- ---------------------------------------------------------------------------
+INCLUDE
+  'coupling/gsatprod_model_hdn.inc' /
+WCONPROD
+  'H-P1' 'OPEN' 'ORAT' 300.0 4* 2500.0 /
+  'H-P2' 'OPEN' 'ORAT' 300.0 4* 2500.0 /
+/
+TSTEP
+  365.0 /

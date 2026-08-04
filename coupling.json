@@ -1,0 +1,31 @@
+{
+  "title": "Coupled reservoir + network simulation example: master_network + model_n + model_hdn",
+  "schedule": {
+    "start": "2024-01-01",
+    "years": 3,
+    "steps_per_year": 1
+  },
+  "coupling": {
+    "max_iterations": 6,
+    "tolerance": 0.005
+  },
+  "initial_rates_sm3d": {
+    "N-P1": 500.0,
+    "N-P2": 600.0
+  },
+  "master": {
+    "model": "master_network",
+    "deck": "MASTER.DATA"
+  },
+  "slaves": {
+    "model_n": {
+      "mode": "coupled",
+      "deck": "MODEL_N.DATA"
+    },
+    "model_hdn": {
+      "mode": "static",
+      "deck": "MODEL_HDN.DATA",
+      "static_profile": "input/static_profiles/gsatprod_model_hdn.inc"
+    }
+  }
+}

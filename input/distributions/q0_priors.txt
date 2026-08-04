@@ -1,0 +1,3 @@
+-- ERT prior distribution for the Q0_MULT parameter group.
+-- Syntax: <NAME> <DISTRIBUTION> <args...>
+Q0_MULT   UNIFORM   0.8  1.2

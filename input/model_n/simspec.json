@@ -1,0 +1,24 @@
+{
+  "model": "model_n",
+  "role": "slave",
+  "mode": "coupled",
+  "deck": "MODEL_N.DATA",
+  "wells": [
+    {
+      "name": "N-P1",
+      "q0_sm3d": 250.0,
+      "p_res0_bar": 325.0,
+      "p_bhp0_bar": 300.0,
+      "depletion_bar_per_year": 3.0,
+      "gor_sm3_sm3": 120.0
+    },
+    {
+      "name": "N-P2",
+      "q0_sm3d": 300.0,
+      "p_res0_bar": 340.0,
+      "p_bhp0_bar": 300.0,
+      "depletion_bar_per_year": 3.0,
+      "gor_sm3_sm3": 120.0
+    }
+  ]
+}

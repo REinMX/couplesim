@@ -1,0 +1,56 @@
+-- ============================================================================
+-- Stage 1: coupled multi-model reservoir + network simulation.
+--
+-- One realization = THREE models run "at the same time" through a single
+-- forward-model step (RUN_COUPLED):
+--     master_network  dummy reservoir + subsea network model   (master)
+--     model_n         subsea wells, GSATPROD profiles from the network
+--                     (coupled slave)
+--     model_hdn       subsea wells, static GSATPROD profiles   (static slave)
+--
+-- The coupling loop (master -> GSATPROD tables -> slaves -> rates ->
+-- converge) lives in bin/run_coupled.py. The "simulators" are stand-ins
+-- (bin/eclipse_dummy.py) so the example runs without an Eclipse licence;
+-- see coupling.json / README for swapping in real Eclipse or OPM Flow.
+--
+-- Your FMU setups use 100 realizations: set NUM_REALIZATIONS 100 when you
+-- plug in the real decks. For quick local checks keep it small (2) or use:
+--     ert test_run 01_coupled.ert
+-- ============================================================================
+
+NUM_REALIZATIONS      2
+RANDOM_SEED           20260804
+
+QUEUE_SYSTEM          LOCAL
+-- Memory, not cores, is the binding constraint on a small box; with real
+-- simulators each slot also holds one flow/eclipse process per model.
+QUEUE_OPTION LOCAL MAX_RUNNING 2
+
+DEFINE  <CASE_DIR>      01_coupled
+
+RUNPATH       ../../output/<CASE_DIR>/realization-<IENS>/iter-<ITER>
+ENSPATH       ../../output/<CASE_DIR>/storage
+RUNPATH_FILE  ../../output/<CASE_DIR>/runpath_file
+
+-- ECLBASE is a path *inside* the runpath (FMU convention). With the dummy
+-- simulators no UNSMRY is produced; with real simulators each model needs
+-- its own summary at the FMU-convention path (see README section 6).
+ECLBASE       eclipse/model/MASTER
+
+-- --- Uncertain parameters --------------------------------------------------
+-- One scalar per realization: reservoir productivity multiplier sampled
+-- from a uniform prior. The coupled slave scales its q0 with it, so every
+-- realization produces slightly different rates -- the same role that
+-- permeability/rock parameters play in your 100-realisation FMU setups.
+GEN_KW  Q0_MULT  ../../input/templates/q0_mult.tmpl  q0_mult.txt  ../../input/distributions/q0_priors.txt
+
+-- --- The forward model -----------------------------------------------------
+-- One step per realization: the coupled driver stages the three models
+-- into the runpath and runs the master/slave coupling loop.
+INSTALL_JOB  RUN_COUPLED  ../bin/jobs/RUN_COUPLED
+
+FORWARD_MODEL RUN_COUPLED
+
+-- --- Responses (with real simulators, uncomment and list every key) --------
+-- SUMMARY  FOPR  FOPT
+-- SUMMARY  WOPR:*  WBHP:*

@@ -1,0 +1,24 @@
+{
+  "model": "model_hdn",
+  "role": "slave",
+  "mode": "static",
+  "deck": "MODEL_HDN.DATA",
+  "wells": [
+    {
+      "name": "H-P1",
+      "q0_sm3d": 180.0,
+      "p_res0_bar": 315.0,
+      "p_bhp0_bar": 295.0,
+      "depletion_bar_per_year": 2.0,
+      "gor_sm3_sm3": 120.0
+    },
+    {
+      "name": "H-P2",
+      "q0_sm3d": 220.0,
+      "p_res0_bar": 315.0,
+      "p_bhp0_bar": 295.0,
+      "depletion_bar_per_year": 2.0,
+      "gor_sm3_sm3": 120.0
+    }
+  ]
+}

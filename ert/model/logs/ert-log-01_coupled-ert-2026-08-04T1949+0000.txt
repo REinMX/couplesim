@@ -1,0 +1,192 @@
+2026-08-04 19:49:43,446 - ert.__main__ - MainThread - INFO - Running ert with Namespace(logdir='./logs', read_only=False, mode='test_run', current_ensemble='default', verbose=False, color_always=False, disable_monitoring=False, port_range=None, config='01_coupled.ert', func=<function run_cli at 0x77474d6872e0>) in /home/javier/projects/coupled-sim-eclipse/ert/model
+2026-08-04 19:49:43,460 - ert.config.ert_config - MainThread - INFO - Content of the configuration file (01_coupled.ert):
+NUM_REALIZATIONS      2
+RANDOM_SEED           20260804
+QUEUE_SYSTEM          LOCAL
+QUEUE_OPTION LOCAL MAX_RUNNING 2
+DEFINE  <CASE_DIR>      01_coupled
+RUNPATH       ../../output/<CASE_DIR>/realization-<IENS>/iter-<ITER>
+ENSPATH       ../../output/<CASE_DIR>/storage
+RUNPATH_FILE  ../../output/<CASE_DIR>/runpath_file
+ECLBASE       eclipse/model/MASTER
+GEN_KW  Q0_MULT  ../../input/templates/q0_mult.tmpl  q0_mult.txt  ../../input/distributions/q0_priors.txt
+INSTALL_JOB  RUN_COUPLED  ../bin/jobs/RUN_COUPLED
+
+2026-08-04 19:49:43,475 - ert.config.ert_config - MainThread - INFO - Custom forward_model_step RUN_COUPLED installed as: -- ERT forward-model step definition ("job"), installed with INSTALL_JOB.
+-- EXECUTABLE is resolved relative to this file (ert/bin/jobs/), so
+-- ../../bin/run_coupled.py is the repository's bin/run_coupled.py.
+-- ERT runs the step with cwd == realization runpath; the driver uses that
+-- to find the GEN_KW result file (q0_mult.txt) and to write the coupling
+-- files, matching the FMU realization-<IENS>/iter-<ITER> layout.
+EXECUTABLE  ../scripts/run_coupled.py
+2026-08-04 19:49:43,477 - ert.config.ert_config - MainThread - INFO - Content of the config_dict: {'DEFINE': [['<CONFIG_PATH>',
+             '/home/javier/projects/coupled-sim-eclipse/ert/model'],
+            ['<CONFIG_FILE_BASE>', '01_coupled'],
+            ['<DATE>', '2026-08-04'],
+            ['<CWD>', '/home/javier/projects/coupled-sim-eclipse/ert/model'],
+            ['<CONFIG_FILE>', '01_coupled.ert'],
+            ['<CASE_DIR>', '01_coupled']],
+ 'ECLBASE': 'eclipse/model/MASTER',
+ 'ENSPATH': '/home/javier/projects/coupled-sim-eclipse/output/01_coupled/storage',
+ 'FORWARD_MODEL': [['RUN_COUPLED']],
+ 'GEN_KW': [['Q0_MULT',
+             ['/home/javier/projects/coupled-sim-eclipse/input/templates/q0_mult.tmpl',
+              'Q0_MULT  <Q0_MULT>\n'],
+             'q0_mult.txt',
+             ['/home/javier/projects/coupled-sim-eclipse/input/distributions/q0_priors.txt',
+              '-- ERT prior distribution for the Q0_MULT parameter group.\n'
+              '-- Syntax: <NAME> <DISTRIBUTION> <args...>\n'
+              'Q0_MULT   UNIFORM   0.8  1.2\n'],
+             {}]],
+ 'INSTALL_JOB': [['RUN_COUPLED',
+                  ['/home/javier/projects/coupled-sim-eclipse/ert/bin/jobs/RUN_COUPLED',
+                   '-- ERT forward-model step definition ("job"), installed '
+                   'with INSTALL_JOB.\n'
+                   '-- EXECUTABLE is resolved relative to this file '
+                   '(ert/bin/jobs/), so\n'
+                   "-- ../../bin/run_coupled.py is the repository's "
+                   'bin/run_coupled.py.\n'
+                   '-- ERT runs the step with cwd == realization runpath; the '
+                   'driver uses that\n'
+                   '-- to find the GEN_KW result file (q0_mult.txt) and to '
+                   'write the coupling\n'
+                   '-- files, matching the FMU realization-<IENS>/iter-<ITER> '
+                   'layout.\n'
+                   'EXECUTABLE  ../scripts/run_coupled.py\n']]],
+ 'NUM_REALIZATIONS': 2,
+ 'QUEUE_OPTION': [[<QueueSystem.LOCAL: 'local'>, 'MAX_RUNNING', '2']],
+ 'QUEUE_SYSTEM': <QueueSystem.LOCAL: 'local'>,
+ 'RANDOM_SEED': 20260804,
+ 'RUNPATH': '/home/javier/projects/coupled-sim-eclipse/output/01_coupled/realization-<IENS>/iter-<ITER>',
+ 'RUNPATH_FILE': '/home/javier/projects/coupled-sim-eclipse/output/01_coupled/runpath_file'}
+2026-08-04 19:49:43,488 - ert.config.ert_config - MainThread - INFO - EnsembleConfig contains parameters of type {'gen_kw': 1}
+2026-08-04 19:49:43,489 - ert.cli.main - MainThread - INFO - Config contains forward model step RUN_COUPLED 1 time(s)
+2026-08-04 19:49:43,489 - ert.run_models.model_factory - MainThread - INFO - Initiating experiment
+2026-08-04 19:49:43,493 - filelock - MainThread - DEBUG - Attempting to acquire lock 131148044135040 on /home/javier/projects/coupled-sim-eclipse/output/01_coupled/storage/storage.lock
+2026-08-04 19:49:43,493 - filelock - MainThread - DEBUG - Lock 131148044135040 acquired on /home/javier/projects/coupled-sim-eclipse/output/01_coupled/storage/storage.lock
+2026-08-04 19:49:43,498 - ert.run_models.run_model - ert_cli_simulation_thread - INFO - Running 'Single realization test-run'
+
+Settings: {'storage_path': '/home/javier/projects/coupled-sim-eclipse/output/01_coupled/storage', 'runpath_file': PosixPath('/home/javier/projects/coupled-sim-eclipse/output/01_coupled/runpath_file'), 'user_config_file': PosixPath('/home/javier/projects/coupled-sim-eclipse/ert/model/01_coupled.ert'), 'env_vars': {}, 'env_pr_fm_step': {}, 'runpath_config': ModelConfig(num_realizations=2, runpath_format_string='/home/javier/projects/coupled-sim-eclipse/output/01_coupled/realization-<IENS>/iter-<ITER>', jobname_format_string='MASTER', summary_file_base_name='eclipse/model/MASTER', gen_kw_export_name='parameters'), 'queue_config': QueueConfig(max_submit=1, queue_system=<QueueSystem.LOCAL: 'local'>, queue_options=LocalQueueOptions(name=<QueueSystem.LOCAL: 'local'>, max_running=2, submit_sleep=0.0, num_cpu=1, realization_memory=0, project_code=None, activate_script=''), stop_long_running=False, max_runtime=None), 'forward_model_steps': [UserInstalledForwardModelStep(name='RUN_COUPLED', executable='/home/javier/projects/coupled-sim-eclipse/ert/bin/scripts/run_coupled.py', stdin_file=None, stdout_file='RUN_COUPLED.stdout', stderr_file='RUN_COUPLED.stderr', start_file=None, target_file=None, error_file=None, max_running_minutes=None, min_arg=None, max_arg=None, arglist=[], required_keywords=[], arg_types=[], environment={'_ERT_ITERATION_NUMBER': '<ITER>', '_ERT_REALIZATION_NUMBER': '<IENS>', '_ERT_RUNPATH': '<RUNPATH>'}, default_mapping={}, private_args={}, type='user_installed')], 'hooked_workflows': defaultdict(<class 'list'>, {}), 'active_realizations': [True], 'log_path': PosixPath('/home/javier/projects/coupled-sim-eclipse/ert/model/update_log'), 'random_seed': 20260804, 'start_iteration': 0, 'minimum_required_realizations': 1, 'experiment_name': 'single-test-run', 'design_matrix': None, 'parameter_configuration': [GenKwConfig(type='gen_kw', name='Q0_MULT', forward_init=False, update_strategy=<LocalizationType.GLOBAL: 'global'>, dimensionality=1, distribution=UnifSettings(name='uniform', min=0.8, max=1.2), group='Q0_MULT', input_source=<DataSource.SAMPLED: 'sampled'>)], 'response_configuration': [], 'derived_response_configuration': [], 'ert_templates': [('/home/javier/projects/coupled-sim-eclipse/input/templates/q0_mult.tmpl', 'q0_mult.txt')], 'observations': [], 'shape_registry': ShapeRegistry(shapes={}), 'experiment_type': <ExperimentType.SINGLE_TEST_RUN: 'Single Test Run'>, 'target_ensemble': 'default'}
+2026-08-04 19:49:43,503 - ert.sample_prior - ert_cli_simulation_thread - INFO - Sampling parameters: Q0_MULT for realizations [0]
+2026-08-04 19:49:43,518 - ert.sample_prior - ert_cli_simulation_thread - DEBUG - sample_prior() time_used=0.0158s
+2026-08-04 19:49:43,519 - ert.run_models._create_run_path - ert_cli_simulation_thread - INFO - create_run_path() time_used=0.0000s
+2026-08-04 19:49:43,527 - ert.run_models._create_run_path - ert_cli_simulation_thread - INFO - _create_run_path durations: defaultdict(<class 'float'>, {'load_scalar_keys': 0.004902162996586412, 'gen_kw': 1.754998811520636e-05, 'value_export_txt': 0.0001962249807547778, 'value_export_json': 0.0001494630123488605, 'generate_parameter_files': 0.0004009509866591543, 'substitute_real_iter': 1.4496006770059466e-05, 'substitute_parameters': 1.670600613579154e-05, 'result_file_to_target': 0.0001575030037201941, 'backup_if_existing': 3.6757002817466855e-05, 'jobs_to_json': 0.0003934559936169535, 'manifest_to_json': 0.00012311901082284749})
+2026-08-04 19:49:43,534 - ert.scheduler.scheduler - ert_cli_simulation_thread - INFO - All tasks started
+2026-08-04 19:49:43,535 - ert.scheduler.local_driver - ert_cli_simulation_thread - DEBUG - Submitting realization 0 as command '/home/javier/projects/ert_fmu/.venv/bin/fm_dispatch.py /home/javier/projects/coupled-sim-eclipse/output/01_coupled/realization-0/iter-0'
+2026-08-04 19:49:43,536 - ert.scheduler.job - ert_cli_simulation_thread - INFO - Pending time for realization 0 was 0.00 seconds (num_cpu=1 realization_memory=0)
+2026-08-04 19:49:44,450 - ert.scheduler.local_driver - ert_cli_simulation_thread - INFO - Realization 0 finished with returncode=0
+2026-08-04 19:49:44,460 - ert.scheduler.local_driver - ert_cli_simulation_thread - INFO - All realization tasks finished
+2026-08-04 19:49:45,047 - ert.ensemble_evaluator.evaluator - ert_cli_simulation_thread - INFO - Ensemble resource usage: walltime_seconds=0.464569 cputime_seconds=0 num_cpu=1 max_memory_usage=-1
+2026-08-04 19:49:45,047 - ert.ensemble_evaluator.evaluator - ert_cli_simulation_thread - INFO - Ensemble ran with maximum memory usage for a single realization job: -1
+2026-08-04 19:49:45,048 - ert.ensemble_evaluator.evaluator - ert_cli_simulation_thread - DEBUG - observed evaluation stopped event, signal done
+2026-08-04 19:49:45,550 - ert.ensemble_evaluator.evaluator - ert_cli_simulation_thread - DEBUG - EE inner_publisher received EETerminated. Exiting...
+2026-08-04 19:49:45,550 - ert.ensemble_evaluator.evaluator - ert_cli_simulation_thread - DEBUG - Async server exiting.
+2026-08-04 19:49:45,551 - ert.ensemble_evaluator.evaluator - ert_cli_simulation_thread - INFO - ZMQ cleanup done!
+2026-08-04 19:49:45,551 - ert.ensemble_evaluator.evaluator - ert_cli_simulation_thread - DEBUG - Evaluator is done
+2026-08-04 19:49:45,551 - ert.run_models.run_model - ert_cli_simulation_thread - DEBUG - tasks complete
+2026-08-04 19:49:45,553 - ert.run_models.run_model - ert_cli_simulation_thread - INFO - Experiment ran on QUEUESYSTEM: local
+2026-08-04 19:49:45,554 - ert.run_models.run_model - ert_cli_simulation_thread - INFO - Experiment ran with number of realizations: 1 out of a total 1
+2026-08-04 19:49:45,554 - ert.run_models.run_model - ert_cli_simulation_thread - INFO - Experiment run ended with number of realizations succeeding: 1
+2026-08-04 19:49:45,554 - ert.run_models.run_model - ert_cli_simulation_thread - INFO - Experiment run ended with number of realizations failing: 0
+2026-08-04 19:49:45,555 - ert.run_models.run_model - ert_cli_simulation_thread - INFO - Experiment run finished in: 2.05741s
+2026-08-04 19:49:45,556 - ert.__main__ - MainThread - INFO - Ert process usage: {'User time': 6.756781, 'System time': 0.709828, 'File system inputs': 52696, 'File system outputs': 152, 'Socket messages sent': 0, 'Socket messages Received': 0, 'Signals received': 0, 'Swaps': 0, 'Peak memory use (KB)': 407220}
+2026-08-04 19:49:46,041 - filelock - MainThread - DEBUG - Attempting to release lock 131148044135040 on /home/javier/projects/coupled-sim-eclipse/output/01_coupled/storage/storage.lock
+2026-08-04 19:49:46,041 - filelock - MainThread - DEBUG - Lock 131148044135040 released on /home/javier/projects/coupled-sim-eclipse/output/01_coupled/storage/storage.lock
+2026-08-04 19:49:57,434 - ert.__main__ - MainThread - INFO - Running ert with Namespace(logdir='./logs', read_only=False, mode='ensemble_experiment', realizations=None, current_ensemble='default', experiment_name='ensemble-experiment', verbose=False, color_always=False, disable_monitoring=False, port_range=None, config='01_coupled.ert', func=<function run_cli at 0x714f6fe772e0>) in /home/javier/projects/coupled-sim-eclipse/ert/model
+2026-08-04 19:49:57,452 - ert.config.ert_config - MainThread - INFO - Content of the configuration file (01_coupled.ert):
+NUM_REALIZATIONS      2
+RANDOM_SEED           20260804
+QUEUE_SYSTEM          LOCAL
+QUEUE_OPTION LOCAL MAX_RUNNING 2
+DEFINE  <CASE_DIR>      01_coupled
+RUNPATH       ../../output/<CASE_DIR>/realization-<IENS>/iter-<ITER>
+ENSPATH       ../../output/<CASE_DIR>/storage
+RUNPATH_FILE  ../../output/<CASE_DIR>/runpath_file
+ECLBASE       eclipse/model/MASTER
+GEN_KW  Q0_MULT  ../../input/templates/q0_mult.tmpl  q0_mult.txt  ../../input/distributions/q0_priors.txt
+INSTALL_JOB  RUN_COUPLED  ../bin/jobs/RUN_COUPLED
+
+2026-08-04 19:49:57,463 - ert.config.ert_config - MainThread - INFO - Custom forward_model_step RUN_COUPLED installed as: -- ERT forward-model step definition ("job"), installed with INSTALL_JOB.
+-- EXECUTABLE is resolved relative to this file (ert/bin/jobs/), so
+-- ../../bin/run_coupled.py is the repository's bin/run_coupled.py.
+-- ERT runs the step with cwd == realization runpath; the driver uses that
+-- to find the GEN_KW result file (q0_mult.txt) and to write the coupling
+-- files, matching the FMU realization-<IENS>/iter-<ITER> layout.
+EXECUTABLE  ../scripts/run_coupled.py
+2026-08-04 19:49:57,464 - ert.config.ert_config - MainThread - INFO - Content of the config_dict: {'DEFINE': [['<CONFIG_PATH>',
+             '/home/javier/projects/coupled-sim-eclipse/ert/model'],
+            ['<CONFIG_FILE_BASE>', '01_coupled'],
+            ['<DATE>', '2026-08-04'],
+            ['<CWD>', '/home/javier/projects/coupled-sim-eclipse/ert/model'],
+            ['<CONFIG_FILE>', '01_coupled.ert'],
+            ['<CASE_DIR>', '01_coupled']],
+ 'ECLBASE': 'eclipse/model/MASTER',
+ 'ENSPATH': '/home/javier/projects/coupled-sim-eclipse/output/01_coupled/storage',
+ 'FORWARD_MODEL': [['RUN_COUPLED']],
+ 'GEN_KW': [['Q0_MULT',
+             ['/home/javier/projects/coupled-sim-eclipse/input/templates/q0_mult.tmpl',
+              'Q0_MULT  <Q0_MULT>\n'],
+             'q0_mult.txt',
+             ['/home/javier/projects/coupled-sim-eclipse/input/distributions/q0_priors.txt',
+              '-- ERT prior distribution for the Q0_MULT parameter group.\n'
+              '-- Syntax: <NAME> <DISTRIBUTION> <args...>\n'
+              'Q0_MULT   UNIFORM   0.8  1.2\n'],
+             {}]],
+ 'INSTALL_JOB': [['RUN_COUPLED',
+                  ['/home/javier/projects/coupled-sim-eclipse/ert/bin/jobs/RUN_COUPLED',
+                   '-- ERT forward-model step definition ("job"), installed '
+                   'with INSTALL_JOB.\n'
+                   '-- EXECUTABLE is resolved relative to this file '
+                   '(ert/bin/jobs/), so\n'
+                   "-- ../../bin/run_coupled.py is the repository's "
+                   'bin/run_coupled.py.\n'
+                   '-- ERT runs the step with cwd == realization runpath; the '
+                   'driver uses that\n'
+                   '-- to find the GEN_KW result file (q0_mult.txt) and to '
+                   'write the coupling\n'
+                   '-- files, matching the FMU realization-<IENS>/iter-<ITER> '
+                   'layout.\n'
+                   'EXECUTABLE  ../scripts/run_coupled.py\n']]],
+ 'NUM_REALIZATIONS': 2,
+ 'QUEUE_OPTION': [[<QueueSystem.LOCAL: 'local'>, 'MAX_RUNNING', '2']],
+ 'QUEUE_SYSTEM': <QueueSystem.LOCAL: 'local'>,
+ 'RANDOM_SEED': 20260804,
+ 'RUNPATH': '/home/javier/projects/coupled-sim-eclipse/output/01_coupled/realization-<IENS>/iter-<ITER>',
+ 'RUNPATH_FILE': '/home/javier/projects/coupled-sim-eclipse/output/01_coupled/runpath_file'}
+2026-08-04 19:49:57,475 - ert.config.ert_config - MainThread - INFO - EnsembleConfig contains parameters of type {'gen_kw': 1}
+2026-08-04 19:49:57,476 - ert.cli.main - MainThread - INFO - Config contains forward model step RUN_COUPLED 1 time(s)
+2026-08-04 19:49:57,476 - ert.run_models.model_factory - MainThread - INFO - Initiating experiment
+2026-08-04 19:49:57,481 - filelock - MainThread - DEBUG - Attempting to acquire lock 124585912714400 on /home/javier/projects/coupled-sim-eclipse/output/01_coupled/storage/storage.lock
+2026-08-04 19:49:57,481 - filelock - MainThread - DEBUG - Lock 124585912714400 acquired on /home/javier/projects/coupled-sim-eclipse/output/01_coupled/storage/storage.lock
+2026-08-04 19:49:57,501 - ert.cli.main - MainThread - WARNING - ERT is running in an existing runpath
+2026-08-04 19:49:57,503 - ert.run_models.run_model - ert_cli_simulation_thread - INFO - Running 'Ensemble experiment'
+
+Settings: {'storage_path': '/home/javier/projects/coupled-sim-eclipse/output/01_coupled/storage', 'runpath_file': PosixPath('/home/javier/projects/coupled-sim-eclipse/output/01_coupled/runpath_file'), 'user_config_file': PosixPath('/home/javier/projects/coupled-sim-eclipse/ert/model/01_coupled.ert'), 'env_vars': {}, 'env_pr_fm_step': {}, 'runpath_config': ModelConfig(num_realizations=2, runpath_format_string='/home/javier/projects/coupled-sim-eclipse/output/01_coupled/realization-<IENS>/iter-<ITER>', jobname_format_string='MASTER', summary_file_base_name='eclipse/model/MASTER', gen_kw_export_name='parameters'), 'queue_config': QueueConfig(max_submit=1, queue_system=<QueueSystem.LOCAL: 'local'>, queue_options=LocalQueueOptions(name=<QueueSystem.LOCAL: 'local'>, max_running=2, submit_sleep=0.0, num_cpu=1, realization_memory=0, project_code=None, activate_script=''), stop_long_running=False, max_runtime=None), 'forward_model_steps': [UserInstalledForwardModelStep(name='RUN_COUPLED', executable='/home/javier/projects/coupled-sim-eclipse/ert/bin/scripts/run_coupled.py', stdin_file=None, stdout_file='RUN_COUPLED.stdout', stderr_file='RUN_COUPLED.stderr', start_file=None, target_file=None, error_file=None, max_running_minutes=None, min_arg=None, max_arg=None, arglist=[], required_keywords=[], arg_types=[], environment={'_ERT_ITERATION_NUMBER': '<ITER>', '_ERT_REALIZATION_NUMBER': '<IENS>', '_ERT_RUNPATH': '<RUNPATH>'}, default_mapping={}, private_args={}, type='user_installed')], 'hooked_workflows': defaultdict(<class 'list'>, {}), 'active_realizations': [True, True], 'log_path': PosixPath('/home/javier/projects/coupled-sim-eclipse/ert/model/update_log'), 'random_seed': 20260804, 'start_iteration': 0, 'minimum_required_realizations': 2, 'experiment_name': 'ensemble-experiment', 'design_matrix': None, 'parameter_configuration': [GenKwConfig(type='gen_kw', name='Q0_MULT', forward_init=False, update_strategy=<LocalizationType.GLOBAL: 'global'>, dimensionality=1, distribution=UnifSettings(name='uniform', min=0.8, max=1.2), group='Q0_MULT', input_source=<DataSource.SAMPLED: 'sampled'>)], 'response_configuration': [], 'derived_response_configuration': [], 'ert_templates': [('/home/javier/projects/coupled-sim-eclipse/input/templates/q0_mult.tmpl', 'q0_mult.txt')], 'observations': [], 'shape_registry': ShapeRegistry(shapes={}), 'experiment_type': <ExperimentType.ENSEMBLE_EXPERIMENT: 'Ensemble Experiment'>, 'target_ensemble': 'default'}
+2026-08-04 19:49:57,507 - ert.sample_prior - ert_cli_simulation_thread - INFO - Sampling parameters: Q0_MULT for realizations [0 1]
+2026-08-04 19:49:57,517 - ert.sample_prior - ert_cli_simulation_thread - DEBUG - sample_prior() time_used=0.0107s
+2026-08-04 19:49:57,518 - ert.run_models._create_run_path - ert_cli_simulation_thread - INFO - create_run_path() time_used=0.0000s
+2026-08-04 19:49:57,529 - ert.run_models._create_run_path - ert_cli_simulation_thread - INFO - _create_run_path durations: defaultdict(<class 'float'>, {'load_scalar_keys': 0.0029409689886961132, 'gen_kw': 7.85140146035701e-05, 'value_export_txt': 0.001092118996893987, 'value_export_json': 0.001466329034883529, 'generate_parameter_files': 0.002750956977251917, 'substitute_real_iter': 3.428800846450031e-05, 'substitute_parameters': 4.259403795003891e-05, 'result_file_to_target': 0.0020288090163376182, 'backup_if_existing': 0.00036606198409572244, 'jobs_to_json': 0.002396152005530894, 'manifest_to_json': 0.0006852040241938084})
+2026-08-04 19:49:57,535 - ert.scheduler.scheduler - ert_cli_simulation_thread - INFO - All tasks started
+2026-08-04 19:49:57,536 - ert.scheduler.local_driver - ert_cli_simulation_thread - DEBUG - Submitting realization 0 as command '/home/javier/projects/ert_fmu/.venv/bin/fm_dispatch.py /home/javier/projects/coupled-sim-eclipse/output/01_coupled/realization-0/iter-0'
+2026-08-04 19:49:57,537 - ert.scheduler.local_driver - ert_cli_simulation_thread - DEBUG - Submitting realization 1 as command '/home/javier/projects/ert_fmu/.venv/bin/fm_dispatch.py /home/javier/projects/coupled-sim-eclipse/output/01_coupled/realization-1/iter-0'
+2026-08-04 19:49:57,539 - ert.scheduler.job - ert_cli_simulation_thread - INFO - Pending time for realization 0 was 0.00 seconds (num_cpu=1 realization_memory=0)
+2026-08-04 19:49:57,539 - ert.scheduler.job - ert_cli_simulation_thread - INFO - Pending time for realization 1 was 0.00 seconds (num_cpu=1 realization_memory=0)
+2026-08-04 19:49:58,452 - ert.scheduler.local_driver - ert_cli_simulation_thread - INFO - Realization 0 finished with returncode=0
+2026-08-04 19:49:58,550 - ert.scheduler.local_driver - ert_cli_simulation_thread - INFO - Realization 1 finished with returncode=0
+2026-08-04 19:49:58,551 - ert.scheduler.local_driver - ert_cli_simulation_thread - INFO - All realization tasks finished
+2026-08-04 19:49:59,046 - ert.ensemble_evaluator.evaluator - ert_cli_simulation_thread - INFO - Ensemble resource usage: walltime_seconds=0.975878 cputime_seconds=0 num_cpu=1 max_memory_usage=-1
+2026-08-04 19:49:59,046 - ert.ensemble_evaluator.evaluator - ert_cli_simulation_thread - INFO - Ensemble ran with maximum memory usage for a single realization job: -1
+2026-08-04 19:49:59,047 - ert.ensemble_evaluator.evaluator - ert_cli_simulation_thread - DEBUG - observed evaluation stopped event, signal done
+2026-08-04 19:49:59,547 - ert.ensemble_evaluator.evaluator - ert_cli_simulation_thread - DEBUG - EE inner_publisher received EETerminated. Exiting...
+2026-08-04 19:49:59,547 - ert.ensemble_evaluator.evaluator - ert_cli_simulation_thread - DEBUG - Async server exiting.
+2026-08-04 19:49:59,548 - ert.ensemble_evaluator.evaluator - ert_cli_simulation_thread - INFO - ZMQ cleanup done!
+2026-08-04 19:49:59,549 - ert.ensemble_evaluator.evaluator - ert_cli_simulation_thread - DEBUG - Evaluator is done
+2026-08-04 19:49:59,549 - ert.run_models.run_model - ert_cli_simulation_thread - DEBUG - tasks complete
+2026-08-04 19:49:59,551 - ert.run_models.run_model - ert_cli_simulation_thread - INFO - Experiment ran on QUEUESYSTEM: local
+2026-08-04 19:49:59,551 - ert.run_models.run_model - ert_cli_simulation_thread - INFO - Experiment ran with number of realizations: 2 out of a total 2
+2026-08-04 19:49:59,551 - ert.run_models.run_model - ert_cli_simulation_thread - INFO - Experiment run ended with number of realizations succeeding: 2
+2026-08-04 19:49:59,552 - ert.run_models.run_model - ert_cli_simulation_thread - INFO - Experiment run ended with number of realizations failing: 0
+2026-08-04 19:49:59,553 - ert.run_models.run_model - ert_cli_simulation_thread - INFO - Experiment run finished in: 2.05127s
+2026-08-04 19:49:59,554 - ert.__main__ - MainThread - INFO - Ert process usage: {'User time': 6.6836459999999995, 'System time': 0.6462359999999999, 'File system inputs': 200, 'File system outputs': 200, 'Socket messages sent': 0, 'Socket messages Received': 0, 'Signals received': 0, 'Swaps': 0, 'Peak memory use (KB)': 407528}
+2026-08-04 19:50:00,090 - filelock - MainThread - DEBUG - Attempting to release lock 124585912714400 on /home/javier/projects/coupled-sim-eclipse/output/01_coupled/storage/storage.lock
+2026-08-04 19:50:00,090 - filelock - MainThread - DEBUG - Lock 124585912714400 released on /home/javier/projects/coupled-sim-eclipse/output/01_coupled/storage/storage.lock
