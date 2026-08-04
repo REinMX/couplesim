@@ -350,13 +350,26 @@ def run_slave(
             "well": row["well"],
             "year": int(row["year"]),
             "network_input_q_liq_sm3d": float(row["network_input_q_liq_sm3d"]),
+            "prescribed_q_liq_sm3d": float(row["prescribed_q_liq_sm3d"]),
+            "simulated_q_liq_sm3d": float(row["simulated_q_liq_sm3d"]),
             "total_network_q_liq_sm3d": float(row["total_network_q_liq_sm3d"]),
+            "p_manifold_bar": float(row["p_manifold_bar"]),
+            "p_wh_bar": float(row["p_wh_bar"]),
             "p_bhp_bar": float(row["p_bhp_bar"]),
         }
         for row in constraints
     ]
+    numeric_constraint_fields = (
+        "network_input_q_liq_sm3d",
+        "prescribed_q_liq_sm3d",
+        "simulated_q_liq_sm3d",
+        "total_network_q_liq_sm3d",
+        "p_manifold_bar",
+        "p_wh_bar",
+        "p_bhp_bar",
+    )
     for constraint in typed_constraints:
-        for field in ("network_input_q_liq_sm3d", "total_network_q_liq_sm3d", "p_bhp_bar"):
+        for field in numeric_constraint_fields:
             if not math.isfinite(float(constraint[field])):
                 raise ValueError(
                     f"network constraints for {spec['model']} require finite {field} for "

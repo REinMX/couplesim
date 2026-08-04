@@ -244,10 +244,13 @@ def initial_rate_rows(
         gor = float(well["gor_sm3_sm3"])
         if not math.isfinite(gor) or gor < 0.0:
             raise ValueError(f"GOR must be finite and non-negative for {model}/{name}: {gor}")
+        initial_gas_rate = rate * gor
+        if not math.isfinite(initial_gas_rate):
+            raise ValueError(f"initial gas rate is non-finite for {model}/{name}")
         rates[name] = {}
         for year in years:
             rates[name][year] = rate
-            rows.append([name, year, rate, rate * gor, "initial_guess"])
+            rows.append([name, year, rate, initial_gas_rate, "initial_guess"])
     path = runpath / "coupling" / f"slave_rates_{model}.csv"
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
