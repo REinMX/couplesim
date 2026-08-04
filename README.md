@@ -9,8 +9,14 @@ A licence-free, executable example of one ERT realization coordinating:
   are inputs to the network in addition to both slaves' simulation results.
 
 The Python dummy makes the orchestration and exchange files testable without
-an Eclipse licence. The included `.DATA`, `NETWORK`, and `GSATPROD` records are
-illustrative scaffolds, **not simulator-validated production decks**.
+an Eclipse licence. The included `.DATA`, `NETWORK`, and `GSATPROD` records under
+`input/` are illustrative scaffolds, **not simulator-validated production
+decks**.
+
+An isolated [real OPM Flow `model_n` round-trip spike](spikes/001-opm-model-n-roundtrip/README.md)
+uses a separate five-cell deck to prove BHP-constraint rendering, actual Flow
+execution, summary extraction, exchange-schema mapping, and rate sensitivity.
+It is not yet connected to the main fixed-point or ERT driver.
 
 ## Intended topology
 
@@ -250,10 +256,10 @@ FMU deck conventions. They must be copied from your working setup/manual; this
 repository does not claim to validate proprietary keyword syntax.
 
 OPM Flow is installed at `/usr/bin/flow`, but the illustrative `NETWORK` and
-`GSATPROD` records in this repository have not been asserted to be supported by
-Flow. The safe next integration step is to build adapters around actual model
-outputs and a known-good deck snapshot, not to treat the illustrative decks as
-parser-valid.
+`GSATPROD` records under `input/` have not been asserted to be supported by
+Flow. The isolated spike now provides a known-good Flow deck and one real
+`model_n` constraint-to-rate adapter; the next integration step is a stateful,
+restart-based backend, not treating the illustrative decks as parser-valid.
 
 ## Configuration reference
 
