@@ -39,6 +39,10 @@ def find_root() -> Path:
 
 ROOT = find_root()
 DEFAULT_CONFIG = ROOT / "coupling.json"
+FLOW_ADAPTER = (
+    ROOT / "spikes" / "003-opm-model-n-restart" / "opm_model_n_restart_adapter.py"
+)
+ALLOWED_BACKENDS = ("dummy", "flow")
 
 
 def log(message: str) -> None:
@@ -128,6 +132,121 @@ def run_dummy(model: str, runpath: Path, iteration: int) -> None:
     )
 
 
+def run_flow_model_n(runpath: Path, iteration: int, coupling: dict[str, Any]) -> None:
+    """Run the real OPM Flow restart backend for model_n (Spike 003 adapter).
+
+    The master has already written network_constraints_model_n.csv; the
+    adapter simulates the full 2024-2026 chain against those BHPs and writes
+    its own raw slave_rates_model_n.csv. The driver then applies the same
+    coupling relaxation the dummy slave applies internally: the raw Flow
+    rates are reported as q_ipr_sm3d (unrelaxed fixed-point target) and the
+    rates forwarded to the master are q_liq_sm3d = q_prev + relaxation *
+    (q_raw - q_prev), keeping the unrelaxed-residual convergence criterion
+    honest while stabilising the real-simulator response.
+    """
+    constraints = runpath / "coupling" / "network_constraints_model_n.csv"
+    if not constraints.is_file():
+        raise FileNotFoundError(
+            f"flow backend requires master constraints before model_n runs: {constraints}"
+        )
+    relaxation = float(coupling["coupling"].get("relaxation", 1.0))
+    if not 0.0 < relaxation <= 1.0:
+        raise ValueError("coupling.relaxation must be in (0, 1]")
+    run_dir = runpath / "coupling" / "flow_model_n" / f"iteration-{iteration:03d}"
+    if run_dir.exists():
+        # Defensive: main() wipes coupling_dir before the loop, but keep the
+        # adapter's "output dir must be absent or empty" contract guaranteed.
+        shutil.rmtree(run_dir)
+    run_dir.mkdir(parents=True)
+    subprocess.run(
+        [
+            sys.executable,
+            str(FLOW_ADAPTER),
+            "--constraints",
+            str(constraints),
+            "--output-dir",
+            str(run_dir),
+        ],
+        check=True,
+        cwd=runpath,
+    )
+    raw_rates = run_dir / "slave_rates_model_n.csv"
+    if not raw_rates.is_file():
+        raise FileNotFoundError(f"flow backend did not produce slave rates: {raw_rates}")
+
+    previous_by_well_year: dict[tuple[str, int], float] = {}
+    with constraints.open(newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            previous_by_well_year[(row["well"], int(row["year"]))] = float(
+                row["network_input_q_liq_sm3d"]
+            )
+    relaxed_rows: list[dict[str, Any]] = []
+    with raw_rates.open(newline="", encoding="utf-8") as handle:
+        raw_rows = list(csv.DictReader(handle))
+    if not raw_rows:
+        raise ValueError(f"flow backend returned an empty rates file: {raw_rates}")
+    required_columns = {
+        "well",
+        "year",
+        "q_liq_sm3d",
+        "q_gas_sm3d",
+        "p_bhp_bar",
+        "p_res_bar",
+        "q_ipr_sm3d",
+        "backpressure_limited",
+    }
+    if not required_columns.issubset(raw_rows[0].keys()):
+        raise ValueError(
+            f"flow backend rates file has unexpected columns: "
+            f"{sorted(raw_rows[0].keys())}"
+        )
+    for row in raw_rows:
+        key = (row["well"], int(row["year"]))
+        if key not in previous_by_well_year:
+            raise ValueError(f"flow backend returned unexpected well/year row: {key}")
+        raw_rate = float(row["q_liq_sm3d"])
+        previous_rate = previous_by_well_year[key]
+        relaxed_rate = previous_rate + relaxation * (raw_rate - previous_rate)
+        relaxed_rows.append(
+            {
+                "well": row["well"],
+                "year": row["year"],
+                "q_liq_sm3d": round(relaxed_rate, 6),
+                "q_gas_sm3d": row["q_gas_sm3d"],
+                "p_bhp_bar": row["p_bhp_bar"],
+                "p_res_bar": row["p_res_bar"],
+                "q_ipr_sm3d": row["q_ipr_sm3d"],
+                "backpressure_limited": row["backpressure_limited"],
+                "origin": "opm_flow_restart_relaxed",
+            }
+        )
+    rates_path = runpath / "coupling" / "slave_rates_model_n.csv"
+    with rates_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(relaxed_rows[0]))
+        writer.writeheader()
+        writer.writerows(relaxed_rows)
+    exchange_dir = runpath / "coupling" / "exchange"
+    exchange_dir.mkdir(parents=True, exist_ok=True)
+    (exchange_dir / f"slave_result_model_n_iteration_{iteration:03d}.json").write_text(
+        json.dumps(
+            {
+                "iteration": iteration,
+                "model": "model_n",
+                "backend": "opm_flow_restart",
+                "relaxation": relaxation,
+                "raw_rates": str(raw_rates),
+                "relaxed_rates": str(rates_path),
+                "adapter_report": str(run_dir / "restart_report.json"),
+            },
+            indent=2,
+            allow_nan=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    log(f"model_n (flow backend, relaxation={relaxation}): {rates_path}")
+
+
 def read_slave_rates(
     coupling_dir: Path, model: str, *, field: str = "q_liq_sm3d"
 ) -> dict[str, dict[int, float]]:
@@ -200,6 +319,25 @@ def validate_topology(coupling: dict[str, Any]) -> None:
         raise ValueError("master model cannot also be configured as a slave")
     if set(coupling["slaves"]) != {"model_n", "model_hdn"}:
         raise ValueError("this example requires both model_n and model_hdn as coupled slaves")
+    for name, cfg in coupling["slaves"].items():
+        backend = str(cfg.get("backend", "dummy"))
+        if backend not in ALLOWED_BACKENDS:
+            raise ValueError(
+                f"slave {name} has unsupported backend {backend!r}; "
+                f"allowed values are {ALLOWED_BACKENDS}"
+            )
+        if backend == "flow":
+            if name != "model_n":
+                raise ValueError("the flow backend is currently supported only for model_n")
+            if not FLOW_ADAPTER.is_file():
+                raise FileNotFoundError(
+                    f"flow backend requires the Spike 003 adapter at {FLOW_ADAPTER}"
+                )
+            for executable in ("flow", "summary"):
+                if shutil.which(executable) is None:
+                    raise FileNotFoundError(
+                        f"flow backend requires the {executable!r} executable on PATH"
+                    )
     if not coupling.get("prescribed_network_profiles"):
         raise ValueError("at least one prescribed network profile is required")
     profile_prefix = Path("input") / master
@@ -281,6 +419,9 @@ def write_report(
     slave_description = ", ".join(
         f"{name} ({str(cfg['role']).replace('_', ' ')})" for name, cfg in slaves.items()
     )
+    slave_backends = ", ".join(
+        f"{name}={coupling['slaves'][name].get('backend', 'dummy')}" for name in slaves
+    )
     lines = [
         "COUPLED RUN REPORT",
         "===================",
@@ -289,6 +430,7 @@ def write_report(
         f"master model       : {master_model}",
         f"prescribed profiles : {profile_description}",
         f"slave models       : {slave_description}",
+        f"slave backends     : {slave_backends}",
         f"iterations         : {history[-1][0]} of {coupling['coupling']['max_iterations']} "
         f"(converged={converged}, tol={coupling['coupling']['tolerance']})",
         "",
@@ -315,9 +457,20 @@ def main() -> int:
     parser.add_argument("--demo", action="store_true", help="run outside ERT")
     parser.add_argument("--runpath", help="explicit output runpath")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="coupling configuration JSON")
+    parser.add_argument(
+        "--backend-model-n",
+        choices=list(ALLOWED_BACKENDS),
+        help="override the model_n slave backend (default: coupling.json)",
+    )
     args = parser.parse_args()
 
     coupling = load_json(Path(args.config))
+    if args.backend_model_n is not None:
+        if "model_n" not in coupling.get("slaves", {}):
+            raise ValueError(
+                "--backend-model-n requires a model_n slave in the coupling configuration"
+            )
+        coupling["slaves"]["model_n"]["backend"] = args.backend_model_n
     validate_topology(coupling)
     master_model = coupling["master"]["model"]
     slaves = coupling["slaves"]
@@ -361,7 +514,10 @@ def main() -> int:
         log(f"--- coupling iteration {iteration}/{max_iterations} ---")
         run_dummy(master_model, runpath, iteration)
         for name in slaves:
-            run_dummy(name, runpath, iteration)
+            if coupling["slaves"][name].get("backend", "dummy") == "flow":
+                run_flow_model_n(runpath, iteration, coupling)
+            else:
+                run_dummy(name, runpath, iteration)
 
         current_rates: dict[str, dict[str, dict[int, float]]] = {}
         difference = 0.0

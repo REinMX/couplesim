@@ -29,11 +29,13 @@
   "slaves": {
     "model_n": {
       "role": "coupled_slave",
-      "deck": "MODEL_N.DATA"
+      "deck": "MODEL_N.DATA",
+      "backend": "dummy"
     },
     "model_hdn": {
       "role": "coupled_slave",
-      "deck": "MODEL_HDN.DATA"
+      "deck": "MODEL_HDN.DATA",
+      "backend": "dummy"
     }
   }
 }

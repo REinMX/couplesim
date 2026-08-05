@@ -13,7 +13,9 @@ an Eclipse licence. The included `.DATA`, `NETWORK`, and `GSATPROD` records unde
 `input/` are illustrative scaffolds, **not simulator-validated production
 decks**.
 
-Isolated OPM Flow spikes (not yet wired into the ERT driver):
+OPM Flow spikes — validated in isolation; Spike 003's restart backend is also
+wired into the ERT driver as an optional `model_n` backend (see "Hybrid mode"
+below):
 
 - [Spike 001 — real `model_n` BHP→rate round trip](spikes/001-opm-model-n-roundtrip/README.md)
 - [Spike 002 — real network master / GSATPROD limits](spikes/002-opm-network-master/README.md)
@@ -57,6 +59,68 @@ Isolated OPM Flow spikes (not yet wired into the ERT driver):
 The external profile wells are deliberately disjoint from the four simulated
 slave wells. This proves that the network receives **three independent source
 categories**, rather than treating one slave as a static profile.
+
+## Hybrid mode: real OPM Flow `model_n` backend
+
+The restart-based backend from Spike 003 is wired into the driver as an
+optional backend for `model_n`. The topology stays hybrid: real Flow
+`model_n` (one 3-year restart chain per coupling iteration), dummy
+`model_hdn`, dummy `master_network`, prescribed GSATPROD source unchanged.
+
+Enable it per slave in `coupling.json`:
+
+```json
+"slaves": {
+  "model_n": { "role": "coupled_slave", "deck": "MODEL_N.DATA", "backend": "flow" },
+  "model_hdn": { "role": "coupled_slave", "deck": "MODEL_HDN.DATA", "backend": "dummy" }
+}
+```
+
+or, for a single standalone/demo run, override on the CLI:
+
+```bash
+python3 ert/bin/scripts/run_coupled.py --demo --backend-model-n flow
+```
+
+Only `model_n` supports `flow` today; the master is always the dummy. When any
+slave uses the flow backend the driver fails **before staging** if `flow` or
+`summary` is not on PATH.
+
+Per coupling iteration the driver:
+
+1. runs the dummy master (unchanged) and writes `network_constraints_model_n.csv`;
+2. runs `spikes/003-opm-model-n-restart/opm_model_n_restart_adapter.py` against
+   those constraints, producing a fresh 3-year 2024–2026 restart chain under
+   `coupling/flow_model_n/iteration-NNN/`;
+3. applies the coupling relaxation to the raw Flow response — raw rates are
+   reported as `q_ipr_sm3d` (the unrelaxed fixed-point target used by the
+   convergence criterion) and the rates forwarded to the master are
+   `q_liq_sm3d = q_prev + relaxation * (q_raw - q_prev)`, exactly mirroring
+   what the dummy slave does internally. Without this step the steep
+   rate-dependent network back-pressure at Flow-scale rates makes the raw
+   fixed-point map oscillate (the master's quadratic branch friction is tuned
+   for the dummy's 250–900 sm³/d rates, not Flow's 1000–2500 sm³/d).
+
+Verified on Flow 2025.10 with the demo config (`--demo --backend-model-n flow`,
+Q0_MULT=1.0): converged in 8 of 12 iterations, tolerance 0.005:
+
+| Iteration | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Residual | 351.6% | 70.7% | 38.7% | 17.9% | 7.8% | 2.6% | 1.1% | 0.40% |
+
+Final Flow rates show the expected depletion decline across years:
+
+| Well | 2024 | 2025 | 2026 |
+|---|---:|---:|---:|
+| N-P1 q_liq sm³/d | 1572.4 | 1384.4 | 1225.1 |
+| N-P2 q_liq sm³/d | 746.4 | 566.8 | 398.9 |
+
+`COUPLED_REPORT.txt` names the backends (`slave backends: model_n=flow,
+model_hdn=dummy`), and `coupling/exchange/slave_result_model_n_iteration_NNN.json`
+records the raw/relaxed rate paths and the relaxation factor.
+
+Note: `Q0_MULT` scales the dummy slaves' productivity; the Flow backend deck
+has fixed productivity, so in hybrid mode `Q0_MULT` varies `model_hdn` only.
 
 ## One ERT realization
 
@@ -262,6 +326,11 @@ GSATPROD/GSATPTAB record layouts depend on the Eclipse version and your current
 FMU deck conventions. They must be copied from your working setup/manual; this
 repository does not claim to validate proprietary keyword syntax.
 
+The "Hybrid mode" section above implements this loop end-to-end for `model_n`
+against the dummy master (steps 1–7, with the annual Flow restart chain
+standing in for step 2's continue-to-coupling-date), using the same exchange
+artifacts a real Eclipse adapter would consume.
+
 OPM Flow 2025.10 is installed at `/usr/bin/flow`. Verified by spikes:
 
 - Flow runs Eclipse standard (`GRUPNET`) and extended (`NETWORK`/`BRANPROP`/
@@ -272,10 +341,11 @@ OPM Flow 2025.10 is installed at `/usr/bin/flow`. Verified by spikes:
   production coupling path keeps the external network solver for prescribed
   satellite hydraulic load until either Flow gains that behaviour or an Eclipse
   licence is available. The stateful restart-based slave backend was validated
-  in [Spike 003](spikes/003-opm-model-n-restart/README.md): Flow continues a
-  slave across annual years with per-year BHP constraints and carries
-  cumulative state. Wiring it into the ERT driver as an optional backend is the
-  next integration step.
+  in [Spike 003](spikes/003-opm-model-n-restart/README.md) and is wired into
+  the ERT driver as the optional `model_n` flow backend (see "Hybrid mode"):
+  Flow continues a slave across annual years with per-year BHP constraints and
+  carries cumulative state inside each coupling iteration. Migrating
+  `model_hdn` and the master are the remaining integration steps.
 
 ## Configuration reference
 

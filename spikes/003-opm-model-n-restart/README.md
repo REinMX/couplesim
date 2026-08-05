@@ -129,7 +129,11 @@ Regression: `python3 -m unittest discover -s tests -p 'test_opm_model_n_restart_
 
 ## Next experiment
 
-Expose a backend switch in `run_coupled.py` (`--model-n-backend dummy|flow`)
-so the ERT `RUN_COUPLED` driver can run the hybrid topology — real Flow
-`model_n`, dummy `model_hdn`, dummy `master_network` — with the prescribed
-GSATPROD source unchanged.
+Done — wired into the ERT driver. The Spike 003 adapter is now selectable as
+the `model_n` slave backend (`slaves.model_n.backend = "flow"` in
+`coupling.json`, or `--backend-model-n flow` on the CLI). The driver applies
+the coupling relaxation to the raw Flow response and the hybrid realization
+(real Flow `model_n`, dummy `model_hdn`, dummy master) converges in 8
+iterations on the demo config; see the main README "Hybrid mode" section.
+Remaining integration steps: migrate `model_hdn` (same backend switch once a
+Flow model_hdn deck exists) and replace the dummy master.
