@@ -111,8 +111,19 @@ class FlowBackendHybridIntegrationTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.temp_dir = tempfile.TemporaryDirectory()
-        cls.runpath = Path(cls.temp_dir.name) / "hybrid-run"
-        cls.completed = run_driver("--backend-model-n", "flow", runpath=cls.runpath)
+        cls.temp = Path(cls.temp_dir.name)
+        # Pin model_hdn to dummy explicitly: the repo default is now hybrid
+        # (both slaves on flow), while this class tests the model_n-only
+        # hybrid topology.
+        config = json.loads((ROOT / "coupling.json").read_text(encoding="utf-8"))
+        config["slaves"]["model_n"]["backend"] = "flow"
+        config["slaves"]["model_hdn"]["backend"] = "dummy"
+        cls.config_path = cls.temp / "coupling-hybrid.json"
+        cls.config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+        cls.runpath = cls.temp / "hybrid-run"
+        cls.completed = run_driver(
+            "--config", str(cls.config_path), runpath=cls.runpath
+        )
 
     @classmethod
     def tearDownClass(cls) -> None:

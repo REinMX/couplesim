@@ -1,5 +1,5 @@
 {
-  "title": "Dummy network master with prescribed GSATPROD sources and two simulated reservoir slaves",
+  "title": "Dummy network master with prescribed GSATPROD sources and two real OPM Flow simulated reservoir slaves",
   "schedule": {
     "start": "2024-01-01",
     "years": 3,
@@ -30,12 +30,12 @@
     "model_n": {
       "role": "coupled_slave",
       "deck": "MODEL_N.DATA",
-      "backend": "dummy"
+      "backend": "flow"
     },
     "model_hdn": {
       "role": "coupled_slave",
       "deck": "MODEL_HDN.DATA",
-      "backend": "dummy"
+      "backend": "flow"
     }
   }
 }

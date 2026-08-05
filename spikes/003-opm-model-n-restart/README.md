@@ -138,9 +138,11 @@ Done — fully wired into the ERT driver. The adapter is selectable as the flow
 slave backend for **both** `model_n` and `model_hdn`
 (`slaves.<name>.backend = "flow"` in `coupling.json`, or
 `--backend-model-n flow` on the CLI for model_n). The driver applies the
-coupling relaxation to each raw Flow response, and the all-real realization
-(both slaves on Flow, dummy master) converges in 7 iterations on the demo
-config; the master network's friction was recalibrated to Flow-scale rates
-(see the main README "Hybrid mode" section). Remaining integration step:
-replace the dummy master when an Eclipse licence (or Flow ≥ 2026.04 with
-GSATPROD network closure) is available.
+coupling relaxation to each raw Flow response, and the hybrid realization
+(both slaves on Flow, dummy master — the repo default) converges in 7
+iterations on the demo config; the master network's friction was
+recalibrated to Flow-scale rates (see the main README "Hybrid mode"
+section). The remaining integration step — replacing the dummy master —
+is complete: the Flow NETWORK master (Spike 004) carries the full hydraulic
+load including the GSATPROD satellites on Flow 2026.04 (Spike 002
+VALIDATED), and the all-real realization converges in 13 iterations.

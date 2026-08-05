@@ -1,11 +1,14 @@
 # Spike 002: real OPM Flow network master
 
 **Status:** complete
-**Verdict:** PARTIAL — proceed with an external network solver for prescribed satellite load, keep OPM Flow for the reservoir + well-VFP network of simulated wells.
+**Verdict:** VALIDATED on Flow **2026.04** — real wells AND GSATPROD
+satellites load the trunk VFP; the Flow master can carry the full network
+hydraulic load (was PARTIAL on 2025.10, where satellites registered in
+group totals but did not load branch VFPs).
 
 ## Question
 
-Given Flow 2025.10 is installed and the project master is currently a dummy, when we author a real Eclipse-compatible NETWORK + GSATPROD deck, then can OPM Flow simulate the shared subsea network that must receive both simulated slave rates and prescribed external satellite profiles?
+Given Flow is installed and the project master is currently a dummy, when we author a real Eclipse-compatible NETWORK + GSATPROD deck, then can OPM Flow simulate the shared subsea network that must receive both simulated slave rates and prescribed external satellite profiles?
 
 ## Why this matters
 
@@ -13,7 +16,7 @@ The coupled example currently uses `bin/eclipse_dummy.py` and an illustrative `n
 
 ## Approach
 
-Three independent probes, all run on Flow 2025.10:
+Three independent probes, verified on Flow 2025.10 and **re-verified on 2026.04**:
 
 | Probe | Deck | What it tests |
 |-------|------|---------------|
@@ -38,7 +41,7 @@ python3 spikes/002-opm-network-master/opm_network_master_spike.py \
 
 Requires `flow` and `summary` on `PATH`.
 
-## Results (Flow 2025.10, verified)
+## Results (Flow 2026.04, verified)
 
 ### A — real wells load the trunk VFP ✅
 
@@ -50,15 +53,18 @@ Requires `flow` and `summary` on `PATH`.
 
 Manifold pressure rises with total rate. At high rate the wells are cut back by network back-pressure (cannot deliver 400). **Network VFP is active.**
 
-### B — GSATPROD does **not** load the trunk VFP ❌
+### B — GSATPROD **does** load the trunk VFP ✅ (2026.04; ❌ on 2025.10)
 
-| Case   | GSATPROD oil | GOPR:SAT | WTHP:M-P1 | GPR:MANIFOLD |
-|--------|--------------|----------|-----------|--------------|
-| sat000 | 0            | 0.0      | 249.6     | **86.05**    |
-| sat130 | 130          | 130.0    | 249.6     | **86.05**    |
-| sat600 | 600          | 600.0    | 249.6     | **86.05**    |
+| Case   | GSATPROD oil | GOPR:SAT | GPR:MANIFOLD |
+|--------|--------------|----------|--------------|
+| sat000 | 0            | 0.0      | **87.8**     |
+| sat130 | 130          | 130.0    | **123.9**    |
+| sat600 | 600          | 600.0    | **266.6**    |
 
-Satellite rates appear correctly in group totals (`GOPR:SAT`), but manifold pressure is **identical** across a 0→600 sm³/d satellite swing. **GSATPROD does not contribute flow to branch VFP evaluation in Flow 2025.10.**
+Satellite rates appear correctly in group totals (`GOPR:SAT`) **and now drive
+the branch VFP**: manifold rises 87.8 → 123.9 → 266.6 bar for a 0→600 sm³/d
+satellite swing with the well rate fixed. On 2025.10 the same probe gave
+86.05 bar flat across all three cases.
 
 ### C — GCONPROD **does** see GSATPROD ✅
 
@@ -70,7 +76,7 @@ GOPR:SAT  = 150.0
 FOPR      = 250.0
 ```
 
-The well is cut back so field total hits the group limit. Satellite rates participate in **group control**, just not in **network hydraulic load**.
+The well is cut back so field total hits the group limit. Satellite rates participate in **group control**.
 
 ## Surprises / limitations found
 
@@ -81,30 +87,25 @@ The well is cut back so field total hits the group limit. Satellite rates partic
 3. **`BRANPROP` must precede `NODEPROP`** or Flow rejects the deck.
 4. **`WELLDIMS` item 3** must cover all non-FIELD groups (PLAT + SAT + MANIFOLD = 3).
 5. **`VFPPDIMS` axes** must match the VFP table dimensions exactly or the table is rejected as incomplete.
-6. OPM 2026.04 is available on the PPA (`apt-cache` candidate) but this spike is verified on installed **2025.10**. Re-check GSATPROD↔network behaviour after upgrading before relying on it.
+6. **Branch VFP tables need item 2 = 0.0 in the VFPPROD header** (well tables use 2000.0). Discovered in Spike 004: with 2000.0 on a branch table, satellite flow is not routed through it (Spike 004 probes on 2026.04: 20× satellite profile, manifold unchanged); with 0.0 the satellite load appears in the manifold.
+7. The 2025.10→2026.04 behaviour change is real and verified: the 2026.04 release notes only mention GSATPROD summary accumulation, but the branch-VFP loading is what actually closes the loop for this architecture.
 
-## Verdict: PARTIAL
+## Verdict: VALIDATED (2026.04)
 
 ### What worked
 - Flow simulates Eclipse standard (`GRUPNET`) and extended (`NETWORK`/`BRANPROP`/`NODEPROP`) network models.
 - Real simulated wells load trunk VFP and experience back-pressure cutback.
-- `GSATPROD` is parsed, contributes to group totals, and participates in `GCONPROD` limits.
+- `GSATPROD` is parsed, contributes to group totals, **loads branch VFPs on 2026.04**, and participates in `GCONPROD` limits.
 - Coupling keywords (`SLAVES`/`GRUPMAST`/`GRUPSLAV`/`RCMASTS`) are recognized by the OPM parser; `--slave` flag exists.
 - All of the above uses Eclipse-compatible keyword syntax, so decks prepared now remain runnable under an Eclipse licence later.
-
-### What didn't
-- **GSATPROD satellite rates do not load network branch VFPs** in Flow 2025.10. A master that relies on prescribed external wells contributing hydraulic load to a shared riser/trunk **cannot** be a pure Flow deck today.
-- Native multi-reservoir coupling (`SLAVES` runtime behaviour) was not end-to-end exercised; only parser recognition + CLI flag presence.
 
 ### Recommendation for the real build
 
 Keep the current file-exchange coupling architecture. Promote pieces as follows:
 
-1. **Simulated slaves** → real Flow adapters (Spike 001 path), with restart state in a later spike.
-2. **Master network hydraulics for simulated + prescribed rates** → keep (or harden) the external network solver currently in `eclipse_dummy.py` / `simspec.json`. Do **not** assume a pure Flow NETWORK deck can replace it while external wells remain GSATPROD satellites.
-3. **Optional Flow master** only for the *reservoir* side of the master (dummy well M-P1) and any well-level VFP that does not need satellite hydraulic contribution.
-4. When the Eclipse licence arrives, the same GRUPNET/NETWORK/GSATPROD decks are the production path; the external solver becomes a fallback.
-5. After upgrading to Flow 2026.04, re-run this spike before changing the architecture — the GSATPROD↔network gap may close.
+1. **Simulated slaves** → real Flow adapters (Spike 001 path) with restart state (Spike 003) — done.
+2. **Master network hydraulics for simulated + prescribed rates** → the Flow NETWORK master (Spike 004) now carries the full hydraulic load including the GSATPROD satellites on Flow ≥ 2026.04. The `eclipse_dummy.py` analytic solver remains the licence-free fallback and the repo default.
+3. When the Eclipse licence arrives, the same GRUPNET/NETWORK/GSATPROD decks are the production path; the external solver becomes a fallback.
 
 ## Files
 

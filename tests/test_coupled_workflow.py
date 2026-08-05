@@ -18,13 +18,37 @@ def read_csv(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
+def base_config() -> dict:
+    """The repo config with every backend pinned to dummy.
+
+    The repo default is the hybrid (both slaves on real OPM Flow); these
+    tests exercise the licence-free dummy workflow, so they opt out of the
+    flow backends explicitly.
+    """
+    config = json.loads((ROOT / "coupling.json").read_text(encoding="utf-8"))
+    for slave in config["slaves"]:
+        config["slaves"][slave]["backend"] = "dummy"
+    return config
+
+
 class CoupledWorkflowTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.temp_dir = tempfile.TemporaryDirectory()
-        cls.runpath = Path(cls.temp_dir.name) / "run"
+        cls.temp = Path(cls.temp_dir.name)
+        cls.config_path = cls.temp / "coupling-dummy.json"
+        cls.config_path.write_text(json.dumps(base_config(), indent=2) + "\n", encoding="utf-8")
+        cls.runpath = cls.temp / "run"
         cls.completed = subprocess.run(
-            [sys.executable, str(DRIVER), "--demo", "--runpath", str(cls.runpath)],
+            [
+                sys.executable,
+                str(DRIVER),
+                "--demo",
+                "--runpath",
+                str(cls.runpath),
+                "--config",
+                str(cls.config_path),
+            ],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -117,7 +141,7 @@ class FailureHandlingTest(unittest.TestCase):
     def test_nonconvergence_fails_the_forward_model(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)
-            config = json.loads((ROOT / "coupling.json").read_text(encoding="utf-8"))
+            config = base_config()
             config["coupling"]["max_iterations"] = 1
             config["coupling"]["tolerance"] = 1.0e-12
             config_path = temp / "nonconvergent.json"
@@ -145,7 +169,7 @@ class FailureHandlingTest(unittest.TestCase):
     def test_tiny_relaxation_does_not_create_false_convergence(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)
-            config = json.loads((ROOT / "coupling.json").read_text(encoding="utf-8"))
+            config = base_config()
             config["coupling"]["relaxation"] = 1.0e-6
             config["coupling"]["max_iterations"] = 2
             config_path = temp / "tiny-relaxation.json"
@@ -176,7 +200,7 @@ class FailureHandlingTest(unittest.TestCase):
     def test_unsafe_master_identifier_is_rejected_without_runpath_damage(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)
-            config = json.loads((ROOT / "coupling.json").read_text(encoding="utf-8"))
+            config = base_config()
             config["master"]["model"] = "."
             config_path = temp / "unsafe-master.json"
             config_path.write_text(json.dumps(config), encoding="utf-8")
@@ -207,7 +231,7 @@ class FailureHandlingTest(unittest.TestCase):
     def test_invalid_zero_relaxation_is_rejected_before_runpath_changes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)
-            config = json.loads((ROOT / "coupling.json").read_text(encoding="utf-8"))
+            config = base_config()
             config["coupling"]["relaxation"] = 0.0
             config_path = temp / "invalid-relaxation.json"
             config_path.write_text(json.dumps(config), encoding="utf-8")
@@ -262,7 +286,7 @@ class FailureHandlingTest(unittest.TestCase):
     def test_dummy_rejects_unimplemented_gsatptab_profile(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)
-            config = json.loads((ROOT / "coupling.json").read_text(encoding="utf-8"))
+            config = base_config()
             config["prescribed_network_profiles"]["external_satellite"]["keyword"] = "GSATPTAB"
             config_path = temp / "gsatptab.json"
             config_path.write_text(json.dumps(config), encoding="utf-8")

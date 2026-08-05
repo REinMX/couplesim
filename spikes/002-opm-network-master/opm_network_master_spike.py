@@ -9,7 +9,7 @@ Cases
 
 2. gsatprod_network  — one real producer + GSATPROD satellite group on
    the same trunk topology. Demonstrates that satellite rates appear in
-   group totals but do NOT load the branch VFP in Flow 2025.10.
+   group totals AND load the branch VFP in Flow 2026.04 (not in 2025.10).
 
 3. gconprod_gsatprod — GCONPROD field oil limit + GSATPROD satellite.
    Demonstrates that satellite rates DO count toward group control limits.
@@ -271,12 +271,21 @@ def analyse(report: dict[str, Any]) -> dict[str, Any]:
             "GOPR:SAT": gcon_values["GOPR:SAT"],
             "FOPR": gcon_values["FOPR"],
         },
-        "verdict": (
-            "PARTIAL"
-            if two_well_loads_trunk and gsat_registers and gcon_sees_satellite and not gsat_loads_trunk
-            else "INVESTIGATE"
-        ),
+        "verdict": _verdict(two_well_loads_trunk, gsat_registers, gsat_loads_trunk, gcon_sees_satellite),
     }
+
+
+def _verdict(
+    two_well_loads_trunk: bool,
+    gsat_registers: bool,
+    gsat_loads_trunk: bool,
+    gcon_sees_satellite: bool,
+) -> str:
+    if two_well_loads_trunk and gsat_registers and gsat_loads_trunk and gcon_sees_satellite:
+        return "VALIDATED"
+    if two_well_loads_trunk and gsat_registers and gcon_sees_satellite:
+        return "PARTIAL"
+    return "INVESTIGATE"
 
 
 def execute(output_dir: Path, flow_name: str, summary_name: str) -> dict[str, Any]:

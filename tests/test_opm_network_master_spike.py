@@ -17,6 +17,32 @@ RUNNER = SPIKE / "opm_network_master_spike.py"
 FLOW_AVAILABLE = shutil.which("flow") is not None and shutil.which("summary") is not None
 
 
+def flow_at_least(version: str) -> bool:
+    """True when the installed flow is at least the given YYYY.MM release."""
+    if not FLOW_AVAILABLE:
+        return False
+    completed = subprocess.run(
+        [shutil.which("flow"), "--version"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return False
+    try:
+        installed = completed.stdout.strip().split()[1]
+    except IndexError:
+        return False
+    return tuple(int(part) for part in installed.split(".")) >= tuple(
+        int(part) for part in version.split(".")
+    )
+
+
+# GSATPROD satellites only load branch VFPs on Flow >= 2026.04 (Spike 002
+# re-verification); the integration test below asserts that behaviour.
+GSAT_LOADS_TRUNK_AVAILABLE = flow_at_least("2026.04")
+
+
 def load_module():
     spec = importlib.util.spec_from_file_location("opm_network_master_spike", RUNNER)
     assert spec is not None and spec.loader is not None
@@ -97,7 +123,11 @@ class OpmNetworkMasterSpikeTest(unittest.TestCase):
                 module.render_template(template, destination, {"__A__": "1", "__B__": "2"})
 
     @unittest.skipUnless(FLOW_AVAILABLE, "requires installed OPM Flow and summary CLI")
-    def test_full_spike_runner_produces_partial_verdict(self) -> None:
+    @unittest.skipUnless(
+        GSAT_LOADS_TRUNK_AVAILABLE,
+        "GSATPROD loads branch VFPs only on OPM Flow >= 2026.04",
+    )
+    def test_full_spike_runner_produces_validated_verdict(self) -> None:
         output_root = ROOT / "output"
         output_root.mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="network-master-", dir=output_root) as temp_dir:
@@ -124,11 +154,11 @@ class OpmNetworkMasterSpikeTest(unittest.TestCase):
             analysis = report["analysis"]
             self.assertTrue(analysis["two_well_loads_trunk_vfp"])
             self.assertTrue(analysis["gsatprod_registers_in_group_totals"])
-            self.assertFalse(analysis["gsatprod_loads_trunk_vfp"])
+            self.assertTrue(analysis["gsatprod_loads_trunk_vfp"])
             self.assertTrue(analysis["gconprod_sees_gsatprod"])
-            self.assertEqual(analysis["verdict"], "PARTIAL")
+            self.assertEqual(analysis["verdict"], "VALIDATED")
 
-            # Quantify the trunk response and the GSATPROD non-response.
+            # Quantify the trunk response and the GSATPROD trunk loading.
             two_well = report["two_well_network"]
             low_p = two_well[0]["results"]["GPR:MANIFOLD"]
             high_p = two_well[-1]["results"]["GPR:MANIFOLD"]
@@ -137,7 +167,7 @@ class OpmNetworkMasterSpikeTest(unittest.TestCase):
             gsat_pressures = [
                 case["results"]["GPR:MANIFOLD"] for case in report["gsatprod_network"]
             ]
-            self.assertLess(max(gsat_pressures) - min(gsat_pressures), 1.0)
+            self.assertGreater(max(gsat_pressures) - min(gsat_pressures), 50.0)
 
             gcon = report["gconprod_gsatprod"]["results"]
             self.assertTrue(math.isclose(gcon["FOPR"], 250.0, abs_tol=1.0e-2))
