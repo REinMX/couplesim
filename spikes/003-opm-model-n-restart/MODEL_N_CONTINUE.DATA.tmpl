@@ -1,0 +1,98 @@
+-- Real OPM Flow 2025.10 spike deck for one stateful model_n year
+-- (continuation). Identical RUNSPEC/GRID/PROPS/SCHEDULE to the base deck;
+-- the SOLUTION section restarts from the previous year's unified restart
+-- file instead of EQUIL.
+RUNSPEC
+TITLE
+  OPM MODEL_N RESTART SPIKE CONTINUATION YEAR
+DIMENS
+  5 1 1 /
+OIL
+WATER
+METRIC
+START
+  1 JAN __START_YEAR__ /
+TABDIMS
+  1 1 /
+EQLDIMS
+  1 /
+WELLDIMS
+  2 1 1 2 /
+UNIFIN
+UNIFOUT
+
+GRID
+INIT
+DX
+  5*2000 /
+DY
+  5*2000 /
+DZ
+  5*200 /
+TOPS
+  5*2000 /
+PORO
+  5*0.25 /
+PERMX
+  5*100 /
+PERMY
+  5*100 /
+PERMZ
+  5*10 /
+
+PROPS
+PVDO
+  100.0 1.2400 1.10
+  250.0 1.2216 1.15
+  400.0 1.2035 1.20 /
+PVTW
+  300.0 1.02 4.3E-5 0.50 0.0 /
+ROCK
+  300.0 5.0E-5 /
+DENSITY
+  850.0 1010.0 1.0 /
+SWOF
+  0.20 0.000 1.000 0.0
+  0.30 0.007 0.720 0.0
+  0.40 0.029 0.490 0.0
+  0.50 0.066 0.300 0.0
+  0.60 0.118 0.160 0.0
+  0.70 0.184 0.060 0.0
+  0.80 0.265 0.010 0.0
+  0.90 0.360 0.000 0.0
+  1.00 0.470 0.000 0.0 /
+
+SOLUTION
+RESTART
+  '__RESTART_CASE__' __RESTART_STEP__ /
+RPTRST
+  BASIC=2 /
+
+SUMMARY
+FOPT
+FWPT
+FPR
+WOPR
+  'N-P1' 'N-P2' /
+WWPR
+  'N-P1' 'N-P2' /
+WBHP
+  'N-P1' 'N-P2' /
+RUNSUM
+
+SCHEDULE
+WELSPECS
+  'N-P1' 'G1' 2 1 2010.0 'OIL' /
+  'N-P2' 'G1' 4 1 2010.0 'OIL' /
+/
+COMPDAT
+  'N-P1' 2 1 1 1 'OPEN' 1* 1* 0.2 1* 0.0 1* 'Z' /
+  'N-P2' 4 1 1 1 'OPEN' 1* 1* 0.2 1* 0.0 1* 'Z' /
+/
+WCONPROD
+  'N-P1' 'OPEN' 'BHP' 5* __N_P1_BHP_BAR__ /
+  'N-P2' 'OPEN' 'BHP' 5* __N_P2_BHP_BAR__ /
+/
+TSTEP
+  __YEAR_DAYS__ /
+END

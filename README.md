@@ -20,6 +20,10 @@ Isolated OPM Flow spikes (not yet wired into the ERT driver):
   (PARTIAL: Flow simulates NETWORK + well VFP and honours GSATPROD in group
   totals/`GCONPROD`, but satellite rates do **not** load trunk branch VFPs on
   Flow 2025.10 — keep the external network solver for prescribed hydraulic load)
+- [Spike 003 — stateful restart-based `model_n` backend](spikes/003-opm-model-n-restart/README.md)
+  (VALIDATED: Flow 2025.10 continues a slave across annual years via the
+  Eclipse `RESTART` keyword with per-year BHP constraints, carries cumulative
+  state, and emits all years in the exchange schema)
 
 ## Intended topology
 
@@ -267,8 +271,11 @@ OPM Flow 2025.10 is installed at `/usr/bin/flow`. Verified by spikes:
 - Therefore the illustrative `input/master_network` decks remain scaffolds; the
   production coupling path keeps the external network solver for prescribed
   satellite hydraulic load until either Flow gains that behaviour or an Eclipse
-  licence is available. The next integration step for slaves is a stateful,
-  restart-based backend.
+  licence is available. The stateful restart-based slave backend was validated
+  in [Spike 003](spikes/003-opm-model-n-restart/README.md): Flow continues a
+  slave across annual years with per-year BHP constraints and carries
+  cumulative state. Wiring it into the ERT driver as an optional backend is the
+  next integration step.
 
 ## Configuration reference
 
