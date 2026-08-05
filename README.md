@@ -60,67 +60,76 @@ The external profile wells are deliberately disjoint from the four simulated
 slave wells. This proves that the network receives **three independent source
 categories**, rather than treating one slave as a static profile.
 
-## Hybrid mode: real OPM Flow `model_n` backend
+## Hybrid mode: real OPM Flow slave backends
 
 The restart-based backend from Spike 003 is wired into the driver as an
-optional backend for `model_n`. The topology stays hybrid: real Flow
-`model_n` (one 3-year restart chain per coupling iteration), dummy
-`model_hdn`, dummy `master_network`, prescribed GSATPROD source unchanged.
-
-Enable it per slave in `coupling.json`:
+optional backend for **each** slave (`model_n` and `model_hdn`). The topology
+stays hybrid: real Flow restart chains for the selected slaves, dummy
+`master_network`, prescribed GSATPROD source unchanged. With both slaves on
+Flow, every coupled reservoir is a real simulator:
 
 ```json
 "slaves": {
   "model_n": { "role": "coupled_slave", "deck": "MODEL_N.DATA", "backend": "flow" },
-  "model_hdn": { "role": "coupled_slave", "deck": "MODEL_HDN.DATA", "backend": "dummy" }
+  "model_hdn": { "role": "coupled_slave", "deck": "MODEL_HDN.DATA", "backend": "flow" }
 }
 ```
 
-or, for a single standalone/demo run, override on the CLI:
+or, for a single standalone/demo run, override `model_n` on the CLI
+(`model_hdn` is config-driven only):
 
 ```bash
 python3 ert/bin/scripts/run_coupled.py --demo --backend-model-n flow
 ```
 
-Only `model_n` supports `flow` today; the master is always the dummy. When any
-slave uses the flow backend the driver fails **before staging** if `flow` or
-`summary` is not on PATH.
+The master is always the dummy. When any slave uses the flow backend the
+driver fails **before staging** if `flow` or `summary` is not on PATH.
 
 Per coupling iteration the driver:
 
-1. runs the dummy master (unchanged) and writes `network_constraints_model_n.csv`;
-2. runs `spikes/003-opm-model-n-restart/opm_model_n_restart_adapter.py` against
-   those constraints, producing a fresh 3-year 2024–2026 restart chain under
-   `coupling/flow_model_n/iteration-NNN/`;
+1. runs the dummy master (unchanged) and writes `network_constraints_<slave>.csv`;
+2. runs `spikes/003-opm-model-n-restart/opm_model_n_restart_adapter.py`
+   (`--model <slave>`) against those constraints, producing a fresh 3-year
+   2024–2026 restart chain under `coupling/flow_<slave>/iteration-NNN/`;
 3. applies the coupling relaxation to the raw Flow response — raw rates are
    reported as `q_ipr_sm3d` (the unrelaxed fixed-point target used by the
    convergence criterion) and the rates forwarded to the master are
    `q_liq_sm3d = q_prev + relaxation * (q_raw - q_prev)`, exactly mirroring
    what the dummy slave does internally. Without this step the steep
    rate-dependent network back-pressure at Flow-scale rates makes the raw
-   fixed-point map oscillate (the master's quadratic branch friction is tuned
-   for the dummy's 250–900 sm³/d rates, not Flow's 1000–2500 sm³/d).
+   fixed-point map oscillate.
 
-Verified on Flow 2025.10 with the demo config (`--demo --backend-model-n flow`,
-Q0_MULT=1.0): converged in 8 of 12 iterations, tolerance 0.005:
+The dummy master's friction parameters were recalibrated for real-simulator
+flow scale (trunk `0.0002/5e-8`, branch `0.0005/1e-7` bar·sm³/d terms; the
+previous values were tuned for the dummy's 250–900 sm³/d rates). At the old
+values the combined Flow-scale total rate drove trunk/branch pressure above
+the hdn reservoir pressure (H-P2 BHP 316.4 bar vs 315 bar initial) — the
+adapter's fail-fast guard caught it, and the fix is a network property, not a
+deck hack.
 
-| Iteration | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| Residual | 351.6% | 70.7% | 38.7% | 17.9% | 7.8% | 2.6% | 1.1% | 0.40% |
+Verified on Flow 2025.10 with both slaves on flow (demo config, Q0_MULT=1.0):
+converged in 7 of 12 iterations, tolerance 0.005:
+
+| Iteration | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Residual | 415.3% | 40.7% | 13.9% | 5.1% | 1.9% | 0.72% | 0.27% |
 
 Final Flow rates show the expected depletion decline across years:
 
 | Well | 2024 | 2025 | 2026 |
 |---|---:|---:|---:|
-| N-P1 q_liq sm³/d | 1572.4 | 1384.4 | 1225.1 |
-| N-P2 q_liq sm³/d | 746.4 | 566.8 | 398.9 |
+| N-P1 q_liq sm³/d (BHP ~303 bar) | 2431.4 | 1856.1 | 1455.5 |
+| N-P2 q_liq sm³/d (BHP ~323 bar) | 1215.7 | 733.0 | 373.3 |
+| H-P1 q_liq sm³/d (BHP ~286 bar) | 1519.4 | 1176.1 | 928.1 |
+| H-P2 q_liq sm³/d (BHP ~298 bar) | 781.3 | 496.4 | 274.2 |
 
 `COUPLED_REPORT.txt` names the backends (`slave backends: model_n=flow,
-model_hdn=dummy`), and `coupling/exchange/slave_result_model_n_iteration_NNN.json`
+model_hdn=flow`), and `coupling/exchange/slave_result_<slave>_iteration_NNN.json`
 records the raw/relaxed rate paths and the relaxation factor.
 
-Note: `Q0_MULT` scales the dummy slaves' productivity; the Flow backend deck
-has fixed productivity, so in hybrid mode `Q0_MULT` varies `model_hdn` only.
+Note: `Q0_MULT` scales the dummy slaves' productivity; the Flow backend decks
+have fixed productivity, so with any slave on flow `Q0_MULT` varies only the
+remaining dummy slaves.
 
 ## One ERT realization
 

@@ -5,10 +5,10 @@
   "network": {
     "outlet_pressure_bar": 40.0,
     "fluid_density_kg_m3": 850.0,
-    "trunk_friction_a_bar_sm3d": 0.001,
-    "trunk_friction_b_bar_sm3d2": 1e-6,
-    "branch_friction_a_bar_sm3d": 0.002,
-    "branch_friction_b_bar_sm3d2": 3e-6
+    "trunk_friction_a_bar_sm3d": 0.0002,
+    "trunk_friction_b_bar_sm3d2": 5e-8,
+    "branch_friction_a_bar_sm3d": 0.0005,
+    "branch_friction_b_bar_sm3d2": 1e-7
   },
   "wells": [
     {

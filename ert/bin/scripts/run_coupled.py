@@ -132,27 +132,27 @@ def run_dummy(model: str, runpath: Path, iteration: int) -> None:
     )
 
 
-def run_flow_model_n(runpath: Path, iteration: int, coupling: dict[str, Any]) -> None:
-    """Run the real OPM Flow restart backend for model_n (Spike 003 adapter).
+def run_flow_slave(model: str, runpath: Path, iteration: int, coupling: dict[str, Any]) -> None:
+    """Run the real OPM Flow restart backend for a slave (Spike 003 adapter).
 
-    The master has already written network_constraints_model_n.csv; the
+    The master has already written network_constraints_<model>.csv; the
     adapter simulates the full 2024-2026 chain against those BHPs and writes
-    its own raw slave_rates_model_n.csv. The driver then applies the same
+    its own raw slave_rates_<model>.csv. The driver then applies the same
     coupling relaxation the dummy slave applies internally: the raw Flow
     rates are reported as q_ipr_sm3d (unrelaxed fixed-point target) and the
     rates forwarded to the master are q_liq_sm3d = q_prev + relaxation *
     (q_raw - q_prev), keeping the unrelaxed-residual convergence criterion
     honest while stabilising the real-simulator response.
     """
-    constraints = runpath / "coupling" / "network_constraints_model_n.csv"
+    constraints = runpath / "coupling" / f"network_constraints_{model}.csv"
     if not constraints.is_file():
         raise FileNotFoundError(
-            f"flow backend requires master constraints before model_n runs: {constraints}"
+            f"flow backend requires master constraints before {model} runs: {constraints}"
         )
     relaxation = float(coupling["coupling"].get("relaxation", 1.0))
     if not 0.0 < relaxation <= 1.0:
         raise ValueError("coupling.relaxation must be in (0, 1]")
-    run_dir = runpath / "coupling" / "flow_model_n" / f"iteration-{iteration:03d}"
+    run_dir = runpath / "coupling" / f"flow_{model}" / f"iteration-{iteration:03d}"
     if run_dir.exists():
         # Defensive: main() wipes coupling_dir before the loop, but keep the
         # adapter's "output dir must be absent or empty" contract guaranteed.
@@ -166,11 +166,13 @@ def run_flow_model_n(runpath: Path, iteration: int, coupling: dict[str, Any]) ->
             str(constraints),
             "--output-dir",
             str(run_dir),
+            "--model",
+            model,
         ],
         check=True,
         cwd=runpath,
     )
-    raw_rates = run_dir / "slave_rates_model_n.csv"
+    raw_rates = run_dir / f"slave_rates_{model}.csv"
     if not raw_rates.is_file():
         raise FileNotFoundError(f"flow backend did not produce slave rates: {raw_rates}")
 
@@ -220,18 +222,18 @@ def run_flow_model_n(runpath: Path, iteration: int, coupling: dict[str, Any]) ->
                 "origin": "opm_flow_restart_relaxed",
             }
         )
-    rates_path = runpath / "coupling" / "slave_rates_model_n.csv"
+    rates_path = runpath / "coupling" / f"slave_rates_{model}.csv"
     with rates_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(relaxed_rows[0]))
         writer.writeheader()
         writer.writerows(relaxed_rows)
     exchange_dir = runpath / "coupling" / "exchange"
     exchange_dir.mkdir(parents=True, exist_ok=True)
-    (exchange_dir / f"slave_result_model_n_iteration_{iteration:03d}.json").write_text(
+    (exchange_dir / f"slave_result_{model}_iteration_{iteration:03d}.json").write_text(
         json.dumps(
             {
                 "iteration": iteration,
-                "model": "model_n",
+                "model": model,
                 "backend": "opm_flow_restart",
                 "relaxation": relaxation,
                 "raw_rates": str(raw_rates),
@@ -244,7 +246,7 @@ def run_flow_model_n(runpath: Path, iteration: int, coupling: dict[str, Any]) ->
         + "\n",
         encoding="utf-8",
     )
-    log(f"model_n (flow backend, relaxation={relaxation}): {rates_path}")
+    log(f"{model} (flow backend, relaxation={relaxation}): {rates_path}")
 
 
 def read_slave_rates(
@@ -327,8 +329,6 @@ def validate_topology(coupling: dict[str, Any]) -> None:
                 f"allowed values are {ALLOWED_BACKENDS}"
             )
         if backend == "flow":
-            if name != "model_n":
-                raise ValueError("the flow backend is currently supported only for model_n")
             if not FLOW_ADAPTER.is_file():
                 raise FileNotFoundError(
                     f"flow backend requires the Spike 003 adapter at {FLOW_ADAPTER}"
@@ -515,7 +515,7 @@ def main() -> int:
         run_dummy(master_model, runpath, iteration)
         for name in slaves:
             if coupling["slaves"][name].get("backend", "dummy") == "flow":
-                run_flow_model_n(runpath, iteration, coupling)
+                run_flow_slave(name, runpath, iteration, coupling)
             else:
                 run_dummy(name, runpath, iteration)
 

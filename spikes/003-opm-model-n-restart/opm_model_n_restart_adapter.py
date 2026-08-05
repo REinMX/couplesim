@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Run a stateful three-year OPM Flow model_n chain with annual BHP constraints.
+"""Run a stateful three-year OPM Flow chain for a coupled slave model.
 
-Each year is one Flow run: 2024 starts fresh from EQUIL, 2025 and 2026
-continue from the previous year's unified restart file via the Eclipse
+Each year is one Flow run: the first year starts fresh from EQUIL, later
+years continue from the previous year's unified restart file via the Eclipse
 RESTART keyword. Year-end WOPR/WWPR/WBHP/FPR/FOPT/FWPT are extracted with
-OPM's `summary -r` CLI and emitted in the existing slave_rates_model_n.csv
+OPM's `summary -r` CLI and emitted in the existing slave_rates_<model>.csv
 exchange schema, plus a restart_report.json containing the statefulness
-checks (cumulative production continuity, restart-state pressure carry,
-WBHP-versus-constraint agreement).
+checks (cumulative production continuity, WBHP-versus-constraint agreement).
+
+Parameterized per slave model (wells, initial pressure) so the same adapter
+serves model_n and model_hdn. Validated for both in Spike 003.
 """
 
 from __future__ import annotations
@@ -22,33 +24,33 @@ from pathlib import Path
 from typing import Any
 
 HERE = Path(__file__).resolve().parent
-BASE_TEMPLATE = HERE / "MODEL_N_BASE.DATA.tmpl"
-CONTINUE_TEMPLATE = HERE / "MODEL_N_CONTINUE.DATA.tmpl"
-EXPECTED_WELLS = ("N-P1", "N-P2")
+BASE_TEMPLATE = HERE / "MODEL_BASE.DATA.tmpl"
+CONTINUE_TEMPLATE = HERE / "MODEL_CONTINUE.DATA.tmpl"
 EXPECTED_YEARS = (2024, 2025, 2026)
-INITIAL_PRESSURE_BAR = 350.0
-SUMMARY_VECTORS = (
-    "FOPT",
-    "FWPT",
-    "FPR",
-    "WOPR:N-P1",
-    "WWPR:N-P1",
-    "WBHP:N-P1",
-    "WOPR:N-P2",
-    "WWPR:N-P2",
-    "WBHP:N-P2",
-)
-# Flow numbers report steps cumulatively across a restart chain: the base run
-# writes step 1, the first continuation writes step 2, and so on. The RESTART
-# step for the continuation of chain position `index` is therefore `index`.
+MODEL_CONFIGS = {
+    "model_n": {
+        "wells": ("N-P1", "N-P2"),
+        "initial_pressure_bar": 350.0,
+        "deck_stem": "MODEL_N",
+    },
+    "model_hdn": {
+        "wells": ("H-P1", "H-P2"),
+        "initial_pressure_bar": 315.0,
+        "deck_stem": "MODEL_HDN",
+    },
+}
 ALL_MARKERS = (
     "__START_YEAR__",
-    "__N_P1_BHP_BAR__",
-    "__N_P2_BHP_BAR__",
+    "__WELL_1__",
+    "__WELL_2__",
+    "__WELL_1_BHP_BAR__",
+    "__WELL_2_BHP_BAR__",
+    "__INITIAL_PRESSURE_BAR__",
     "__YEAR_DAYS__",
     "__RESTART_CASE__",
     "__RESTART_STEP__",
 )
+NAME_MARKERS = ("__WELL_1__", "__WELL_2__")
 
 
 def days_in_year(year: int) -> int:
@@ -60,7 +62,16 @@ def days_in_year(year: int) -> int:
     return 365
 
 
-def read_constraints_chain(path: Path) -> dict[int, dict[str, float]]:
+def summary_vectors(wells: tuple[str, ...]) -> tuple[str, ...]:
+    vectors: list[str] = ["FOPT", "FWPT", "FPR"]
+    for well in wells:
+        vectors.extend((f"WOPR:{well}", f"WWPR:{well}", f"WBHP:{well}"))
+    return tuple(vectors)
+
+
+def read_constraints_chain(
+    path: Path, wells: tuple[str, ...], initial_pressure_bar: float
+) -> dict[int, dict[str, float]]:
     if not path.is_file():
         raise FileNotFoundError(f"constraint file does not exist: {path}")
     with path.open(newline="", encoding="utf-8") as handle:
@@ -79,8 +90,8 @@ def read_constraints_chain(path: Path) -> dict[int, dict[str, float]]:
                     f"unexpected constraint year {row_year}; expected {EXPECTED_YEARS}"
                 )
             well = row["well"]
-            if well not in EXPECTED_WELLS:
-                raise ValueError(f"unexpected model_n constraint well: {well!r}")
+            if well not in wells:
+                raise ValueError(f"unexpected constraint well {well!r}; expected {wells}")
             year_map = by_year.setdefault(row_year, {})
             if well in year_map:
                 raise ValueError(f"duplicate constraint for {well}/{row_year}")
@@ -92,9 +103,9 @@ def read_constraints_chain(path: Path) -> dict[int, dict[str, float]]:
                 raise ValueError(
                     f"BHP constraint must be finite positive for {well}/{row_year}: {bhp}"
                 )
-            if bhp >= INITIAL_PRESSURE_BAR:
+            if bhp >= initial_pressure_bar:
                 raise ValueError(
-                    f"BHP constraint must be below {INITIAL_PRESSURE_BAR} bar for "
+                    f"BHP constraint must be below {initial_pressure_bar} bar for "
                     f"this production-only spike: {well}/{row_year}={bhp}"
                 )
             year_map[well] = bhp
@@ -102,7 +113,7 @@ def read_constraints_chain(path: Path) -> dict[int, dict[str, float]]:
     if missing_years:
         raise ValueError(f"missing constraint rows for years: {missing_years}")
     for year, year_map in by_year.items():
-        missing = sorted(set(EXPECTED_WELLS) - year_map.keys())
+        missing = sorted(set(wells) - year_map.keys())
         if missing:
             raise ValueError(f"missing constraints for year {year}: {missing}")
     return by_year
@@ -121,10 +132,16 @@ def render_deck(
     replacements: dict[str, str],
 ) -> None:
     rendered = template.read_text(encoding="utf-8")
-    for marker, value in replacements.items():
-        if rendered.count(marker) != 1:
+    # Longer markers first: "__WELL_1_BHP_BAR__" contains "__WELL_1__" as a
+    # substring, so BHP markers must be replaced before the bare names.
+    for marker in sorted(replacements, key=len, reverse=True):
+        count = rendered.count(marker)
+        if marker in NAME_MARKERS:
+            if count < 1:
+                raise ValueError(f"deck template {template.name} must contain {marker}")
+        elif count != 1:
             raise ValueError(f"deck template {template.name} must contain exactly one {marker}")
-        rendered = rendered.replace(marker, value)
+        rendered = rendered.replace(marker, replacements[marker])
     leftover = [marker for marker in ALL_MARKERS if marker in rendered]
     if leftover:
         raise ValueError(f"deck template {template.name} left markers unreplaced: {leftover}")
@@ -147,14 +164,14 @@ def run_checked(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess
     return completed
 
 
-def parse_summary(text: str) -> list[dict[str, float]]:
+def parse_summary(text: str, vectors: tuple[str, ...]) -> list[dict[str, float]]:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     if len(lines) < 2:
         raise ValueError(
             f"expected at least one report-step row from summary, found {len(lines) - 1}"
         )
     header = lines[0].split()
-    if tuple(header) != SUMMARY_VECTORS:
+    if tuple(header) != vectors:
         raise ValueError(f"unexpected summary vectors: {header}")
     rows: list[dict[str, float]] = []
     for line in lines[1:]:
@@ -169,12 +186,14 @@ def parse_summary(text: str) -> list[dict[str, float]]:
     return rows
 
 
-def extract_summary(summary_executable: str, smspec: Path) -> tuple[list[dict[str, float]], str]:
+def extract_summary(
+    summary_executable: str, smspec: Path, vectors: tuple[str, ...]
+) -> tuple[list[dict[str, float]], str]:
     completed = run_checked(
-        [summary_executable, "-r", str(smspec), *SUMMARY_VECTORS],
+        [summary_executable, "-r", str(smspec), *vectors],
         cwd=smspec.parent,
     )
-    return parse_summary(completed.stdout), completed.stdout
+    return parse_summary(completed.stdout, vectors), completed.stdout
 
 
 def stage_restart_files(previous_year_dir: Path, year_dir: Path, restart_case: str) -> None:
@@ -188,6 +207,9 @@ def stage_restart_files(previous_year_dir: Path, year_dir: Path, restart_case: s
 
 
 def run_year(
+    deck_stem: str,
+    wells: tuple[str, ...],
+    initial_pressure_bar: float,
     year: int,
     constraints: dict[str, float],
     year_dir: Path,
@@ -197,15 +219,18 @@ def run_year(
     restart_step: int | None = None,
 ) -> dict[str, Any]:
     year_dir.mkdir(parents=True, exist_ok=True)
-    deck_name = f"MODEL_N_{year}.DATA"
+    deck_name = f"{deck_stem}_{year}.DATA"
     deck_path = year_dir / deck_name
     replacements = {
         "__START_YEAR__": str(year),
-        "__N_P1_BHP_BAR__": f"{constraints['N-P1']:.6f}",
-        "__N_P2_BHP_BAR__": f"{constraints['N-P2']:.6f}",
+        "__WELL_1__": wells[0],
+        "__WELL_2__": wells[1],
+        "__WELL_1_BHP_BAR__": f"{constraints[wells[0]]:.6f}",
+        "__WELL_2_BHP_BAR__": f"{constraints[wells[1]]:.6f}",
         "__YEAR_DAYS__": str(days_in_year(year)),
     }
     if restart_case is None:
+        replacements["__INITIAL_PRESSURE_BAR__"] = f"{initial_pressure_bar:.6f}"
         render_deck(deck_path, BASE_TEMPLATE, replacements)
     else:
         if restart_step is None:
@@ -231,7 +256,7 @@ def run_year(
     unsmry = flow_dir / f"{deck_name[:-5]}.UNSMRY"
     if not smspec.is_file() or not unsmry.is_file():
         raise FileNotFoundError(f"Flow did not create required summary artifacts below {flow_dir}")
-    rows, summary_text = extract_summary(summary_executable, smspec)
+    rows, summary_text = extract_summary(summary_executable, smspec, summary_vectors(wells))
     (year_dir / "summary.txt").write_text(summary_text, encoding="utf-8")
 
     end = rows[-1]
@@ -247,7 +272,7 @@ def run_year(
                 "wbhp_bar": end[f"WBHP:{well}"],
                 "q_liq_sm3d": end[f"WOPR:{well}"] + end[f"WWPR:{well}"],
             }
-            for well in EXPECTED_WELLS
+            for well in wells
         },
         "field": {
             "fopt_sm3": end["FOPT"],
@@ -263,8 +288,15 @@ def run_chain(
     output_dir: Path,
     flow_name: str,
     summary_name: str,
+    model: str = "model_n",
 ) -> Path:
-    constraints = read_constraints_chain(constraints_path)
+    if model not in MODEL_CONFIGS:
+        raise ValueError(f"unsupported model {model!r}; expected {sorted(MODEL_CONFIGS)}")
+    config = MODEL_CONFIGS[model]
+    wells = config["wells"]
+    initial_pressure_bar = config["initial_pressure_bar"]
+    deck_stem = config["deck_stem"]
+    constraints = read_constraints_chain(constraints_path, wells, initial_pressure_bar)
     if output_dir.exists() and any(output_dir.iterdir()):
         raise ValueError(f"output directory must be absent or empty: {output_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -275,10 +307,13 @@ def run_chain(
 
     year_results: list[dict[str, Any]] = []
     for index, year in enumerate(EXPECTED_YEARS):
-        restart_case = None if index == 0 else f"MODEL_N_{EXPECTED_YEARS[index - 1]}"
+        restart_case = None if index == 0 else f"{deck_stem}_{EXPECTED_YEARS[index - 1]}"
         year_dir = output_dir / f"year-{year}"
         year_results.append(
             run_year(
+                deck_stem,
+                wells,
+                initial_pressure_bar,
                 year,
                 constraints[year],
                 year_dir,
@@ -343,11 +378,11 @@ def run_chain(
     if rate_issues:
         checks["rate_issues"] = rate_issues
 
-    rates_path = output_dir / "slave_rates_model_n.csv"
+    rates_path = output_dir / f"slave_rates_{model}.csv"
     rows: list[dict[str, Any]] = []
     for result in year_results:
         reservoir_pressure = round(result["field"]["fpr_bar"], 6)
-        for well in EXPECTED_WELLS:
+        for well in wells:
             values = result["wells"][well]
             liquid_rate = round(values["q_liq_sm3d"], 6)
             rows.append(
@@ -371,6 +406,8 @@ def run_chain(
     report = {
         "simulator": version,
         "extractor": Path(summary_executable).name,
+        "model": model,
+        "wells": list(wells),
         "years": list(EXPECTED_YEARS),
         "constraints": constraints,
         "year_results": year_results,
@@ -379,15 +416,15 @@ def run_chain(
             "rates": str(rates_path),
             "years": {
                 str(year): {
-                    "deck": str(output_dir / f"year-{year}" / f"MODEL_N_{year}.DATA"),
+                    "deck": str(output_dir / f"year-{year}" / f"{deck_stem}_{year}.DATA"),
                     "smspec": str(
-                        output_dir / f"year-{year}" / "flow-run" / f"MODEL_N_{year}.SMSPEC"
+                        output_dir / f"year-{year}" / "flow-run" / f"{deck_stem}_{year}.SMSPEC"
                     ),
                     "unsmry": str(
-                        output_dir / f"year-{year}" / "flow-run" / f"MODEL_N_{year}.UNSMRY"
+                        output_dir / f"year-{year}" / "flow-run" / f"{deck_stem}_{year}.UNSMRY"
                     ),
                     "unrst": str(
-                        output_dir / f"year-{year}" / "flow-run" / f"MODEL_N_{year}.UNRST"
+                        output_dir / f"year-{year}" / "flow-run" / f"{deck_stem}_{year}.UNRST"
                     ),
                 }
                 for year in EXPECTED_YEARS
@@ -405,6 +442,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--constraints", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument(
+        "--model",
+        choices=sorted(MODEL_CONFIGS),
+        default="model_n",
+        help="slave model whose exchange contract this chain fills",
+    )
     parser.add_argument("--flow", default="flow", help="Flow executable name or path")
     parser.add_argument("--summary", default="summary", help="OPM summary executable name or path")
     args = parser.parse_args()
@@ -413,8 +456,9 @@ def main() -> int:
         args.output_dir.resolve(),
         args.flow,
         args.summary,
+        model=args.model,
     )
-    print(f"OPM MODEL_N RESTART CHAIN COMPLETE: {rates_path}")
+    print(f"OPM {args.model.upper()} RESTART CHAIN COMPLETE: {rates_path}")
     return 0
 
 

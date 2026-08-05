@@ -9,13 +9,16 @@ re-initialized).
 
 ## Question
 
-Can a stateful `model_n` backend stage one runpath, run a fresh base case for
+Can a stateful slave backend stage one runpath, run a fresh base case for
 2024, continue 2025 and 2026 from Flow restart files, apply each year's BHP
-constraints, and write one `slave_rates_model_n.csv` with all three years in
+constraints, and write one `slave_rates_<model>.csv` with all three years in
 the coupling exchange schema?
 
 This is the "stateful, restart-based backend" that Spikes 001 and 002 both
-declared as the next integration step for slaves.
+declared as the next integration step for slaves. The adapter is parameterized
+per slave model (`--model model_n|model_hdn`; well names, initial pressure,
+and deck stems differ), so one validated implementation serves both coupled
+slaves.
 
 ## Approach
 
@@ -67,11 +70,13 @@ OPM's `summary -r` CLI and emitted as `slave_rates_model_n.csv` rows plus a
 ```bash
 python3 spikes/003-opm-model-n-restart/opm_model_n_restart_adapter.py \
   --constraints output/demo/realization-0/coupling/network_constraints_model_n.csv \
-  --output-dir output/opm-model-n-restart-spike
+  --output-dir output/opm-model-n-restart-spike \
+  --model model_n
 ```
 
-Requires `flow` and `summary` on PATH. The output directory must be absent or
-empty. The full chain runs in about 3 seconds on this 5-cell model.
+`--model model_hdn` runs the same chain for the hdn slave (H-P1/H-P2, 315 bar
+initial). Requires `flow` and `summary` on PATH. The output directory must be
+absent or empty. The full chain runs in about 3 seconds on this 5-cell model.
 
 ## Outputs
 
@@ -129,11 +134,13 @@ Regression: `python3 -m unittest discover -s tests -p 'test_opm_model_n_restart_
 
 ## Next experiment
 
-Done — wired into the ERT driver. The Spike 003 adapter is now selectable as
-the `model_n` slave backend (`slaves.model_n.backend = "flow"` in
-`coupling.json`, or `--backend-model-n flow` on the CLI). The driver applies
-the coupling relaxation to the raw Flow response and the hybrid realization
-(real Flow `model_n`, dummy `model_hdn`, dummy master) converges in 8
-iterations on the demo config; see the main README "Hybrid mode" section.
-Remaining integration steps: migrate `model_hdn` (same backend switch once a
-Flow model_hdn deck exists) and replace the dummy master.
+Done — fully wired into the ERT driver. The adapter is selectable as the flow
+slave backend for **both** `model_n` and `model_hdn`
+(`slaves.<name>.backend = "flow"` in `coupling.json`, or
+`--backend-model-n flow` on the CLI for model_n). The driver applies the
+coupling relaxation to each raw Flow response, and the all-real realization
+(both slaves on Flow, dummy master) converges in 7 iterations on the demo
+config; the master network's friction was recalibrated to Flow-scale rates
+(see the main README "Hybrid mode" section). Remaining integration step:
+replace the dummy master when an Eclipse licence (or Flow ≥ 2026.04 with
+GSATPROD network closure) is available.

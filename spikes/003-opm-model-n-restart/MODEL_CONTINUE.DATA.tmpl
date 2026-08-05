@@ -1,10 +1,10 @@
--- Real OPM Flow 2025.10 spike deck for one stateful model_n year (fresh start).
--- Fresh-initialized 5-cell oil-water model with one annual report step.
--- The continuation deck for later years replaces the SOLUTION section with
--- RESTART and re-renders this same RUNSPEC/GRID/PROPS/SCHEDULE skeleton.
+-- Real OPM Flow 2025.10 spike deck for one stateful slave year
+-- (continuation). Identical RUNSPEC/GRID/PROPS/SCHEDULE to the base deck;
+-- the SOLUTION section restarts from the previous year's unified restart
+-- file instead of EQUIL.
 RUNSPEC
 TITLE
-  OPM MODEL_N RESTART SPIKE BASE YEAR
+  OPM SLAVE RESTART SPIKE CONTINUATION YEAR
 DIMENS
   5 1 1 /
 OIL
@@ -63,8 +63,8 @@ SWOF
   1.00 0.470 0.000 0.0 /
 
 SOLUTION
-EQUIL
-  2010 350.0 3000.0 0.0 1500.0 0.0 1* 1* 0 /
+RESTART
+  '__RESTART_CASE__' __RESTART_STEP__ /
 RPTRST
   BASIC=2 /
 
@@ -73,25 +73,25 @@ FOPT
 FWPT
 FPR
 WOPR
-  'N-P1' 'N-P2' /
+  '__WELL_1__' '__WELL_2__' /
 WWPR
-  'N-P1' 'N-P2' /
+  '__WELL_1__' '__WELL_2__' /
 WBHP
-  'N-P1' 'N-P2' /
+  '__WELL_1__' '__WELL_2__' /
 RUNSUM
 
 SCHEDULE
 WELSPECS
-  'N-P1' 'G1' 2 1 2010.0 'OIL' /
-  'N-P2' 'G1' 4 1 2010.0 'OIL' /
+  '__WELL_1__' 'G1' 2 1 2010.0 'OIL' /
+  '__WELL_2__' 'G1' 4 1 2010.0 'OIL' /
 /
 COMPDAT
-  'N-P1' 2 1 1 1 'OPEN' 1* 1* 0.2 1* 0.0 1* 'Z' /
-  'N-P2' 4 1 1 1 'OPEN' 1* 1* 0.2 1* 0.0 1* 'Z' /
+  '__WELL_1__' 2 1 1 1 'OPEN' 1* 1* 0.2 1* 0.0 1* 'Z' /
+  '__WELL_2__' 4 1 1 1 'OPEN' 1* 1* 0.2 1* 0.0 1* 'Z' /
 /
 WCONPROD
-  'N-P1' 'OPEN' 'BHP' 5* __N_P1_BHP_BAR__ /
-  'N-P2' 'OPEN' 'BHP' 5* __N_P2_BHP_BAR__ /
+  '__WELL_1__' 'OPEN' 'BHP' 5* __WELL_1_BHP_BAR__ /
+  '__WELL_2__' 'OPEN' 'BHP' 5* __WELL_2_BHP_BAR__ /
 /
 TSTEP
   __YEAR_DAYS__ /

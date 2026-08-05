@@ -13,9 +13,9 @@
 -- both slaves -> new rates -> convergence. The prescribed external profile
 -- remains an independent, immutable input to the master at every iteration.
 -- The driver lives in ert/bin/scripts/run_coupled.py; the licence-free model
--- adapter is bin/eclipse_dummy.py. An optional real OPM Flow backend for
--- model_n is selectable per slave via coupling.json ("backend": "flow") or
--- the driver's --backend-model-n flag; see README.md "Hybrid mode".
+-- adapter is bin/eclipse_dummy.py. An optional real OPM Flow backend for each
+-- slave is selectable per slave via coupling.json ("backend": "flow") or the
+-- driver's --backend-model-n flag (model_n only); see README.md "Hybrid mode".
 -- See coupling.json and README.md for the work required to replace the rest
 -- with real Eclipse or OPM Flow adapters.
 --

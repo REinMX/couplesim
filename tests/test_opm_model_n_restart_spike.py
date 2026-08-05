@@ -47,6 +47,16 @@ class OpmModelNRestartValidationTest(unittest.TestCase):
             ("N-P2", 2026, 300.0),
         ]
 
+    def hdn_rows(self) -> list[tuple[str, int, object]]:
+        return [
+            ("H-P1", 2024, 280.0),
+            ("H-P2", 2024, 295.0),
+            ("H-P1", 2025, 275.0),
+            ("H-P2", 2025, 290.0),
+            ("H-P1", 2026, 270.0),
+            ("H-P2", 2026, 285.0),
+        ]
+
     def test_days_in_year_leap_and_common(self) -> None:
         module = load_adapter()
         self.assertEqual(module.days_in_year(2024), 366)
@@ -57,16 +67,36 @@ class OpmModelNRestartValidationTest(unittest.TestCase):
 
     def test_constraints_chain_parses_all_years_and_wells(self) -> None:
         module = load_adapter()
+        wells = module.MODEL_CONFIGS["model_n"]["wells"]
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "constraints.csv"
             self.write_constraints(path, self.valid_rows())
-            parsed = module.read_constraints_chain(path)
+            parsed = module.read_constraints_chain(path, wells, 350.0)
             self.assertEqual(set(parsed), {2024, 2025, 2026})
             self.assertEqual(parsed[2024], {"N-P1": 300.0, "N-P2": 320.0})
             self.assertEqual(parsed[2026]["N-P2"], 300.0)
 
+    def test_model_hdn_constraints_use_h_wells_and_315_bar_cap(self) -> None:
+        module = load_adapter()
+        wells = module.MODEL_CONFIGS["model_hdn"]["wells"]
+        self.assertEqual(wells, ("H-P1", "H-P2"))
+        self.assertEqual(module.MODEL_CONFIGS["model_hdn"]["initial_pressure_bar"], 315.0)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "hdn.csv"
+            self.write_constraints(path, self.hdn_rows())
+            parsed = module.read_constraints_chain(path, wells, 315.0)
+            self.assertEqual(set(parsed), {2024, 2025, 2026})
+            self.assertEqual(parsed[2024], {"H-P1": 280.0, "H-P2": 295.0})
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "hdn-over.csv"
+            self.write_constraints(path, [(w, y, 316.0) for w, y in [("H-P1", 2024), ("H-P2", 2024), ("H-P1", 2025), ("H-P2", 2025), ("H-P1", 2026), ("H-P2", 2026)]])
+            with self.assertRaises(ValueError) as ctx:
+                module.read_constraints_chain(path, wells, 315.0)
+            self.assertIn("below 315.0", str(ctx.exception))
+
     def test_constraints_chain_rejects_bad_inputs(self) -> None:
         module = load_adapter()
+        wells = module.MODEL_CONFIGS["model_n"]["wells"]
         cases = (
             ("missing-year", [row for row in self.valid_rows() if row[1] != 2026], "missing constraint rows for years"),
             ("missing-well", [row for row in self.valid_rows() if row != ("N-P2", 2024, 320.0)], "missing constraints for year 2024"),
@@ -74,7 +104,7 @@ class OpmModelNRestartValidationTest(unittest.TestCase):
             ("non-finite", [("N-P1", 2024, 300.0), ("N-P2", 2024, "NaN"), ("N-P1", 2025, 290.0), ("N-P2", 2025, 310.0), ("N-P1", 2026, 280.0), ("N-P2", 2026, 300.0)], "finite positive"),
             ("at-initial-pressure", [("N-P1", 2024, 300.0), ("N-P2", 2024, 350.0), ("N-P1", 2025, 290.0), ("N-P2", 2025, 310.0), ("N-P1", 2026, 280.0), ("N-P2", 2026, 300.0)], "must be below 350.0"),
             ("unexpected-year", [("N-P1", 2024, 300.0), ("N-P2", 2024, 320.0), ("N-P1", 2025, 290.0), ("N-P2", 2025, 310.0), ("N-P1", 2026, 280.0), ("N-P2", 2027, 300.0)], "unexpected constraint year"),
-            ("unexpected-well", [("N-P1", 2024, 300.0), ("N-P2", 2024, 320.0), ("N-P1", 2025, 290.0), ("N-P2", 2025, 310.0), ("N-P1", 2026, 280.0), ("N-P3", 2026, 300.0)], "unexpected model_n constraint well"),
+            ("unexpected-well", [("N-P1", 2024, 300.0), ("N-P2", 2024, 320.0), ("N-P1", 2025, 290.0), ("N-P2", 2025, 310.0), ("N-P1", 2026, 280.0), ("N-P3", 2026, 300.0)], "unexpected constraint well"),
         )
         for name, rows, expected in cases:
             with self.subTest(name=name):
@@ -82,7 +112,7 @@ class OpmModelNRestartValidationTest(unittest.TestCase):
                     path = Path(temp_dir) / f"{name}.csv"
                     self.write_constraints(path, rows)
                     with self.assertRaises(ValueError) as ctx:
-                        module.read_constraints_chain(path)
+                        module.read_constraints_chain(path, wells, 350.0)
                     self.assertIn(expected, str(ctx.exception))
 
     def test_rendered_base_deck_replaces_all_markers(self) -> None:
@@ -94,19 +124,48 @@ class OpmModelNRestartValidationTest(unittest.TestCase):
                 module.BASE_TEMPLATE,
                 {
                     "__START_YEAR__": "2024",
-                    "__N_P1_BHP_BAR__": "301.327561",
-                    "__N_P2_BHP_BAR__": "321.860831",
+                    "__WELL_1__": "N-P1",
+                    "__WELL_2__": "N-P2",
+                    "__WELL_1_BHP_BAR__": "301.327561",
+                    "__WELL_2_BHP_BAR__": "321.860831",
+                    "__INITIAL_PRESSURE_BAR__": "350.000000",
                     "__YEAR_DAYS__": "366",
                 },
             )
             rendered = deck.read_text(encoding="utf-8")
             self.assertIn("START\n  1 JAN 2024 /", rendered)
             self.assertIn("'N-P1' 'OPEN' 'BHP' 5* 301.327561 /", rendered)
+            self.assertIn("'N-P2' 'OPEN' 'BHP' 5* 321.860831 /", rendered)
             self.assertIn("TSTEP\n  366 /", rendered)
+            self.assertIn("2010 350.000000 3000.0", rendered)
             self.assertNotIn("__START_YEAR__", rendered)
-            self.assertNotIn("__N_P1_BHP_BAR__", rendered)
+            self.assertNotIn("__WELL_1__", rendered)
+            self.assertNotIn("__WELL_1_BHP_BAR__", rendered)
             self.assertNotIn("__YEAR_DAYS__", rendered)
             self.assertNotIn("RESTART\n", rendered)
+
+    def test_rendered_hdn_deck_uses_h_wells(self) -> None:
+        module = load_adapter()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            deck = Path(temp_dir) / "MODEL_HDN_2024.DATA"
+            module.render_deck(
+                deck,
+                module.BASE_TEMPLATE,
+                {
+                    "__START_YEAR__": "2024",
+                    "__WELL_1__": "H-P1",
+                    "__WELL_2__": "H-P2",
+                    "__WELL_1_BHP_BAR__": "285.500000",
+                    "__WELL_2_BHP_BAR__": "297.900000",
+                    "__INITIAL_PRESSURE_BAR__": "315.000000",
+                    "__YEAR_DAYS__": "366",
+                },
+            )
+            rendered = deck.read_text(encoding="utf-8")
+            self.assertIn("'H-P1' 'OPEN' 'BHP' 5* 285.500000 /", rendered)
+            self.assertIn("'H-P2' 'OPEN' 'BHP' 5* 297.900000 /", rendered)
+            self.assertIn("2010 315.000000 3000.0", rendered)
+            self.assertNotIn("__WELL_1__", rendered)
 
     def test_rendered_continuation_deck_uses_restart_case_and_step(self) -> None:
         module = load_adapter()
@@ -117,8 +176,10 @@ class OpmModelNRestartValidationTest(unittest.TestCase):
                 module.CONTINUE_TEMPLATE,
                 {
                     "__START_YEAR__": "2025",
-                    "__N_P1_BHP_BAR__": "300.948929",
-                    "__N_P2_BHP_BAR__": "321.515758",
+                    "__WELL_1__": "N-P1",
+                    "__WELL_2__": "N-P2",
+                    "__WELL_1_BHP_BAR__": "300.948929",
+                    "__WELL_2_BHP_BAR__": "321.515758",
                     "__YEAR_DAYS__": "365",
                     "__RESTART_CASE__": "MODEL_N_2024",
                     "__RESTART_STEP__": "1",
@@ -142,8 +203,10 @@ class OpmModelNRestartValidationTest(unittest.TestCase):
                     module.CONTINUE_TEMPLATE,
                     {
                         "__START_YEAR__": "2026",
-                        "__N_P1_BHP_BAR__": "300.586081",
-                        "__N_P2_BHP_BAR__": "321.185606",
+                        "__WELL_1__": "N-P1",
+                        "__WELL_2__": "N-P2",
+                        "__WELL_1_BHP_BAR__": "300.586081",
+                        "__WELL_2_BHP_BAR__": "321.185606",
                         "__YEAR_DAYS__": "365",
                         "__RESTART_CASE__": "MODEL_N_2025",
                     },
@@ -166,10 +229,27 @@ class OpmModelNRestartValidationTest(unittest.TestCase):
                 )
             self.assertIn("must be absent or empty", str(ctx.exception))
 
+    def test_unsupported_model_is_rejected(self) -> None:
+        module = load_adapter()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            constraints = Path(temp_dir) / "constraints.csv"
+            self.write_constraints(constraints, self.valid_rows())
+            with self.assertRaises(ValueError) as ctx:
+                module.run_chain(
+                    constraints,
+                    Path(temp_dir) / "run",
+                    "flow-binary-that-does-not-exist",
+                    "summary-binary-that-does-not-exist",
+                    model="model_xyz",
+                )
+            self.assertIn("unsupported model", str(ctx.exception))
+
     def test_missing_constraint_file_is_rejected(self) -> None:
         module = load_adapter()
         with self.assertRaises(FileNotFoundError):
-            module.read_constraints_chain(Path("/nonexistent/constraints.csv"))
+            module.read_constraints_chain(
+                Path("/nonexistent/constraints.csv"), ("N-P1", "N-P2"), 350.0
+            )
 
     def test_chain_run_fails_fast_without_flow(self) -> None:
         module = load_adapter()
@@ -207,6 +287,7 @@ class OpmModelNRestartIntegrationTest(unittest.TestCase):
 
             report = json.loads((output_dir / "restart_report.json").read_text(encoding="utf-8"))
             self.assertTrue(report["simulator"].startswith("flow "))
+            self.assertEqual(report["model"], "model_n")
             self.assertEqual(report["checks"]["fopt_strictly_increasing"], True)
             self.assertEqual(report["checks"]["fwpt_non_decreasing"], True)
             self.assertEqual(report["checks"]["wbhp_matches_constraint"], True)
@@ -235,8 +316,11 @@ class OpmModelNRestartIntegrationTest(unittest.TestCase):
                 module.BASE_TEMPLATE,
                 {
                     "__START_YEAR__": "2025",
-                    "__N_P1_BHP_BAR__": f"{report['constraints']['2025']['N-P1']:.6f}",
-                    "__N_P2_BHP_BAR__": f"{report['constraints']['2025']['N-P2']:.6f}",
+                    "__WELL_1__": "N-P1",
+                    "__WELL_2__": "N-P2",
+                    "__WELL_1_BHP_BAR__": f"{report['constraints']['2025']['N-P1']:.6f}",
+                    "__WELL_2_BHP_BAR__": f"{report['constraints']['2025']['N-P2']:.6f}",
+                    "__INITIAL_PRESSURE_BAR__": "350.000000",
                     "__YEAR_DAYS__": "365",
                 },
             )
@@ -247,7 +331,8 @@ class OpmModelNRestartIntegrationTest(unittest.TestCase):
                 cwd=fresh_dir,
             )
             fresh_rows, _ = module.extract_summary(
-                summary, fresh_dir / "fresh-out" / "MODEL_N_FRESH2025.SMSPEC"
+                summary, fresh_dir / "fresh-out" / "MODEL_N_FRESH2025.SMSPEC",
+                module.summary_vectors(("N-P1", "N-P2")),
             )
             fresh_fopt = fresh_rows[-1]["FOPT"]
             self.assertGreater(fopt[2025], fresh_fopt + 0.5 * fopt[2024])

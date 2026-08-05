@@ -58,16 +58,24 @@ class FlowBackendValidationTest(unittest.TestCase):
             self.assertIn("unsupported backend", completed.stderr)
             self.assertFalse((temp / "run" / "master_network").exists())
 
-    def test_flow_backend_on_model_hdn_is_rejected(self) -> None:
+    def test_flow_backend_on_model_hdn_is_accepted(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)
             config = temp / "coupling.json"
             slaves = json.loads((ROOT / "coupling.json").read_text(encoding="utf-8"))["slaves"]
             slaves["model_hdn"]["backend"] = "flow"
             self.write_config(config, slaves)
-            completed = run_driver("--config", str(config), runpath=temp / "run")
+            stripped = {"PATH": ""}
+            completed = run_driver(
+                "--config", str(config),
+                runpath=temp / "run",
+                env=stripped,
+            )
+            # Validation accepts the hdn flow backend; the stripped PATH makes
+            # the executable preflight fail before any staging.
             self.assertNotEqual(completed.returncode, 0)
-            self.assertIn("supported only for model_n", completed.stderr)
+            self.assertIn("flow backend requires", completed.stderr)
+            self.assertFalse((temp / "run" / "master_network").exists())
 
     def test_flow_backend_requires_executables_before_staging(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -175,6 +183,80 @@ class FlowBackendHybridIntegrationTest(unittest.TestCase):
         rows = read_csv(self.runpath / "coupling" / "slave_rates_model_hdn.csv")
         self.assertTrue(rows)
         self.assertTrue(all(row["origin"] == "simulation_output" for row in rows))
+
+
+@unittest.skipUnless(FLOW_AVAILABLE, "requires installed OPM Flow and summary CLI")
+class FlowBackendBothFlowIntegrationTest(unittest.TestCase):
+    """Both slaves on real Flow: model_n and model_hdn restart chains in the
+    same coupled realization (the repo's intended hybrid topology)."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.temp_dir = tempfile.TemporaryDirectory()
+        cls.temp = Path(cls.temp_dir.name)
+        config = json.loads((ROOT / "coupling.json").read_text(encoding="utf-8"))
+        config["slaves"]["model_n"]["backend"] = "flow"
+        config["slaves"]["model_hdn"]["backend"] = "flow"
+        cls.config_path = cls.temp / "coupling-both.json"
+        cls.config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+        cls.runpath = cls.temp / "both-run"
+        cls.completed = run_driver("--config", str(cls.config_path), runpath=cls.runpath)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.temp_dir.cleanup()
+
+    def test_both_flow_realization_converges(self) -> None:
+        self.assertEqual(self.completed.returncode, 0, self.completed.stderr)
+        history = read_csv(self.runpath / "coupling" / "convergence_history.csv")
+        self.assertGreaterEqual(len(history), 2)
+        self.assertLessEqual(float(history[-1]["max_fixed_point_residual"]), 0.005)
+        report = (self.runpath / "COUPLED_REPORT.txt").read_text(encoding="utf-8")
+        self.assertIn("slave backends     : model_n=flow, model_hdn=flow", report)
+
+    def test_both_slaves_emit_real_flow_rates(self) -> None:
+        self.assertEqual(self.completed.returncode, 0, self.completed.stderr)
+        for model, wells in (("model_n", {"N-P1", "N-P2"}), ("model_hdn", {"H-P1", "H-P2"})):
+            rows = read_csv(self.runpath / "coupling" / f"slave_rates_{model}.csv")
+            self.assertEqual(len(rows), 6)
+            self.assertEqual({row["well"] for row in rows}, wells)
+            self.assertEqual({int(row["year"]) for row in rows}, {2024, 2025, 2026})
+            for row in rows:
+                self.assertTrue(row["origin"].startswith("opm_flow_restart"))
+                self.assertGreater(float(row["q_liq_sm3d"]), 0.0)
+            flow_iters = sorted((self.runpath / "coupling" / f"flow_{model}").glob("iteration-*"))
+            self.assertGreaterEqual(len(flow_iters), 2)
+            self.assertTrue(
+                (flow_iters[-1] / "restart_report.json").is_file(),
+                f"adapter report must exist for the final {model} Flow run",
+            )
+            result = json.loads(
+                (
+                    self.runpath
+                    / "coupling"
+                    / "exchange"
+                    / f"slave_result_{model}_iteration_001.json"
+                ).read_text(encoding="utf-8")
+            )
+            self.assertEqual(result["model"], model)
+            self.assertEqual(result["backend"], "opm_flow_restart")
+
+    def test_master_combines_three_source_categories(self) -> None:
+        self.assertEqual(self.completed.returncode, 0, self.completed.stderr)
+        requests = sorted(
+            (self.runpath / "coupling" / "exchange").glob("network_request_iteration_*.json")
+        )
+        request = json.loads(requests[-1].read_text(encoding="utf-8"))
+        self.assertEqual(set(request["sources"]["simulated_slaves"]), {"model_n", "model_hdn"})
+        self.assertEqual(
+            set(request["sources"]["prescribed_profiles"]), {"external_satellite"}
+        )
+        for total in request["totals_by_year"]:
+            self.assertAlmostEqual(
+                total["network_q_liq_sm3d"],
+                total["prescribed_q_liq_sm3d"] + total["simulated_q_liq_sm3d"],
+                places=6,
+            )
 
 
 if __name__ == "__main__":
