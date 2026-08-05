@@ -13,10 +13,13 @@ an Eclipse licence. The included `.DATA`, `NETWORK`, and `GSATPROD` records unde
 `input/` are illustrative scaffolds, **not simulator-validated production
 decks**.
 
-An isolated [real OPM Flow `model_n` round-trip spike](spikes/001-opm-model-n-roundtrip/README.md)
-uses a separate five-cell deck to prove BHP-constraint rendering, actual Flow
-execution, summary extraction, exchange-schema mapping, and rate sensitivity.
-It is not yet connected to the main fixed-point or ERT driver.
+Isolated OPM Flow spikes (not yet wired into the ERT driver):
+
+- [Spike 001 — real `model_n` BHP→rate round trip](spikes/001-opm-model-n-roundtrip/README.md)
+- [Spike 002 — real network master / GSATPROD limits](spikes/002-opm-network-master/README.md)
+  (PARTIAL: Flow simulates NETWORK + well VFP and honours GSATPROD in group
+  totals/`GCONPROD`, but satellite rates do **not** load trunk branch VFPs on
+  Flow 2025.10 — keep the external network solver for prescribed hydraulic load)
 
 ## Intended topology
 
@@ -255,11 +258,17 @@ GSATPROD/GSATPTAB record layouts depend on the Eclipse version and your current
 FMU deck conventions. They must be copied from your working setup/manual; this
 repository does not claim to validate proprietary keyword syntax.
 
-OPM Flow is installed at `/usr/bin/flow`, but the illustrative `NETWORK` and
-`GSATPROD` records under `input/` have not been asserted to be supported by
-Flow. The isolated spike now provides a known-good Flow deck and one real
-`model_n` constraint-to-rate adapter; the next integration step is a stateful,
-restart-based backend, not treating the illustrative decks as parser-valid.
+OPM Flow 2025.10 is installed at `/usr/bin/flow`. Verified by spikes:
+
+- Flow runs Eclipse standard (`GRUPNET`) and extended (`NETWORK`/`BRANPROP`/
+  `NODEPROP`) network models; real wells load trunk VFP and see back-pressure.
+- `GSATPROD` is parsed, contributes to group totals, and participates in
+  `GCONPROD` limits — but does **not** load network branch VFPs on 2025.10.
+- Therefore the illustrative `input/master_network` decks remain scaffolds; the
+  production coupling path keeps the external network solver for prescribed
+  satellite hydraulic load until either Flow gains that behaviour or an Eclipse
+  licence is available. The next integration step for slaves is a stateful,
+  restart-based backend.
 
 ## Configuration reference
 
