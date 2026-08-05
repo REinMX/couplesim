@@ -42,6 +42,7 @@ DEFAULT_CONFIG = ROOT / "coupling.json"
 FLOW_ADAPTER = (
     ROOT / "spikes" / "003-opm-model-n-restart" / "opm_model_n_restart_adapter.py"
 )
+FLOW_MASTER_ADAPTER = ROOT / "spikes" / "004-opm-flow-master" / "opm_flow_master_adapter.py"
 ALLOWED_BACKENDS = ("dummy", "flow")
 
 
@@ -249,6 +250,75 @@ def run_flow_slave(model: str, runpath: Path, iteration: int, coupling: dict[str
     log(f"{model} (flow backend, relaxation={relaxation}): {rates_path}")
 
 
+def staged_profile_path(runpath: Path, coupling: dict[str, Any], master: str) -> Path:
+    """Resolve the single GSATPROD prescribed profile in the staged runpath.
+
+    Mirrors the dummy master's contract (validate_topology guarantees every
+    prescribed profile is GSATPROD below input/<master>); stage_model copies
+    input/<master> into the runpath, so the staged profile is
+    runpath/<master>/<profile path relative to input/<master>>.
+    """
+    profiles = [
+        profile
+        for profile in coupling["prescribed_network_profiles"].values()
+        if profile.get("keyword") == "GSATPROD"
+    ]
+    if len(profiles) != 1:
+        raise ValueError("flow master requires exactly one GSATPROD prescribed profile")
+    configured = Path(profiles[0]["path"])
+    staged = runpath / master / configured.relative_to(Path("input") / master)
+    if not staged.is_file():
+        raise FileNotFoundError(f"flow master requires the staged prescribed profile: {staged}")
+    return staged
+
+
+def run_flow_master(runpath: Path, iteration: int, coupling: dict[str, Any]) -> None:
+    """Run the real OPM Flow network master (Spike 004 adapter).
+
+    The master runs first each iteration: it consumes the slaves' latest
+    rates (initial guesses on iteration 1) plus the prescribed GSATPROD
+    profile, solves the shared network in Flow, and writes
+    network_constraints_<slave>.csv for both slaves. The adapter's outputs
+    are promoted into the coupling exchange directory.
+    """
+    coupling_dir = runpath / "coupling"
+    rates_model_n = coupling_dir / "slave_rates_model_n.csv"
+    rates_model_hdn = coupling_dir / "slave_rates_model_hdn.csv"
+    for rates in (rates_model_n, rates_model_hdn):
+        if not rates.is_file():
+            raise FileNotFoundError(f"flow master requires slave rates before running: {rates}")
+    profile = staged_profile_path(runpath, coupling, coupling["master"]["model"])
+    run_dir = coupling_dir / "flow_master" / f"iteration-{iteration:03d}"
+    if run_dir.exists():
+        shutil.rmtree(run_dir)
+    run_dir.mkdir(parents=True)
+    subprocess.run(
+        [
+            sys.executable,
+            str(FLOW_MASTER_ADAPTER),
+            "--rates-model-n",
+            str(rates_model_n),
+            "--rates-model-hdn",
+            str(rates_model_hdn),
+            "--profile",
+            str(profile),
+            "--output-dir",
+            str(run_dir),
+        ],
+        check=True,
+        cwd=runpath,
+    )
+    for model in ("model_n", "model_hdn"):
+        source = run_dir / f"network_constraints_{model}.csv"
+        if not source.is_file():
+            raise FileNotFoundError(f"flow master did not produce constraints: {source}")
+        shutil.copy2(source, coupling_dir / f"network_constraints_{model}.csv")
+    # The dummy slaves write their exchange JSONs here; the dummy master
+    # creates this directory, so the flow master must too.
+    (coupling_dir / "exchange").mkdir(parents=True, exist_ok=True)
+    log(f"master (flow backend): constraints written for model_n and model_hdn")
+
+
 def read_slave_rates(
     coupling_dir: Path, model: str, *, field: str = "q_liq_sm3d"
 ) -> dict[str, dict[int, float]]:
@@ -319,6 +389,22 @@ def validate_topology(coupling: dict[str, Any]) -> None:
         raise ValueError("master model must be 'master_network'")
     if master in coupling["slaves"]:
         raise ValueError("master model cannot also be configured as a slave")
+    master_backend = str(coupling["master"].get("backend", "dummy"))
+    if master_backend not in ALLOWED_BACKENDS:
+        raise ValueError(
+            f"master has unsupported backend {master_backend!r}; "
+            f"allowed values are {ALLOWED_BACKENDS}"
+        )
+    if master_backend == "flow":
+        if not FLOW_MASTER_ADAPTER.is_file():
+            raise FileNotFoundError(
+                f"flow master backend requires the Spike 004 adapter at {FLOW_MASTER_ADAPTER}"
+            )
+        for executable in ("flow", "summary"):
+            if shutil.which(executable) is None:
+                raise FileNotFoundError(
+                    f"flow master backend requires the {executable!r} executable on PATH"
+                )
     if set(coupling["slaves"]) != {"model_n", "model_hdn"}:
         raise ValueError("this example requires both model_n and model_hdn as coupled slaves")
     for name, cfg in coupling["slaves"].items():
@@ -512,7 +598,10 @@ def main() -> int:
 
     for iteration in range(1, max_iterations + 1):
         log(f"--- coupling iteration {iteration}/{max_iterations} ---")
-        run_dummy(master_model, runpath, iteration)
+        if coupling["master"].get("backend", "dummy") == "flow":
+            run_flow_master(runpath, iteration, coupling)
+        else:
+            run_dummy(master_model, runpath, iteration)
         for name in slaves:
             if coupling["slaves"][name].get("backend", "dummy") == "flow":
                 run_flow_slave(name, runpath, iteration, coupling)

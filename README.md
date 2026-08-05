@@ -13,9 +13,9 @@ an Eclipse licence. The included `.DATA`, `NETWORK`, and `GSATPROD` records unde
 `input/` are illustrative scaffolds, **not simulator-validated production
 decks**.
 
-OPM Flow spikes — validated in isolation; Spike 003's restart backend is also
-wired into the ERT driver as an optional `model_n` backend (see "Hybrid mode"
-below):
+OPM Flow spikes — validated in isolation; Spike 003's restart backend and
+Spike 004's network master are wired into the ERT driver as optional
+backends (see "Hybrid mode" below):
 
 - [Spike 001 — real `model_n` BHP→rate round trip](spikes/001-opm-model-n-roundtrip/README.md)
 - [Spike 002 — real network master / GSATPROD limits](spikes/002-opm-network-master/README.md)
@@ -26,6 +26,10 @@ below):
   (VALIDATED: Flow 2025.10 continues a slave across annual years via the
   Eclipse `RESTART` keyword with per-year BHP constraints, carries cumulative
   state, and emits all years in the exchange schema)
+- [Spike 004 — real OPM Flow network master](spikes/004-opm-flow-master/README.md)
+  (VALIDATED: a Flow NETWORK deck serves as the coupled master — four real
+  slave wells load the trunk, GSATPROD registers in group totals, and the
+  all-real realization converges in 12 iterations)
 
 ## Intended topology
 
@@ -76,22 +80,31 @@ Flow, every coupled reservoir is a real simulator:
 ```
 
 or, for a single standalone/demo run, override `model_n` on the CLI
-(`model_hdn` is config-driven only):
+(`model_hdn` and the master are config-driven only):
 
 ```bash
 python3 ert/bin/scripts/run_coupled.py --demo --backend-model-n flow
 ```
 
-The master is always the dummy. When any slave uses the flow backend the
-driver fails **before staging** if `flow` or `summary` is not on PATH.
+The master also supports `flow` (`"backend": "flow"` on the master config),
+which runs the Spike 004 network deck: four real slave wells with VFP tables
+load a shared trunk, the prescribed profile enters as GSATPROD group totals,
+and the per-well BHP constraints come from the Flow network solve
+(`p_bhp = node pressure + wellbore hydrostatic`). With the master and both
+slaves on flow, every coupled model is a real simulator. When any flow
+backend is enabled the driver fails **before staging** if `flow` or `summary`
+is not on PATH.
 
 Per coupling iteration the driver:
 
-1. runs the dummy master (unchanged) and writes `network_constraints_<slave>.csv`;
+1. runs the master — dummy, or the Spike 004 Flow network deck
+   (`coupling/flow_master/iteration-NNN/`) — and writes
+   `network_constraints_<slave>.csv`;
 2. runs `spikes/003-opm-model-n-restart/opm_model_n_restart_adapter.py`
-   (`--model <slave>`) against those constraints, producing a fresh 3-year
-   2024–2026 restart chain under `coupling/flow_<slave>/iteration-NNN/`;
-3. applies the coupling relaxation to the raw Flow response — raw rates are
+   (`--model <slave>`) for each flow slave against those constraints,
+   producing a fresh 3-year 2024–2026 restart chain under
+   `coupling/flow_<slave>/iteration-NNN/`;
+3. applies the coupling relaxation to each raw Flow response — raw rates are
    reported as `q_ipr_sm3d` (the unrelaxed fixed-point target used by the
    convergence criterion) and the rates forwarded to the master are
    `q_liq_sm3d = q_prev + relaxation * (q_raw - q_prev)`, exactly mirroring
@@ -105,27 +118,34 @@ previous values were tuned for the dummy's 250–900 sm³/d rates). At the old
 values the combined Flow-scale total rate drove trunk/branch pressure above
 the hdn reservoir pressure (H-P2 BHP 316.4 bar vs 315 bar initial) — the
 adapter's fail-fast guard caught it, and the fix is a network property, not a
-deck hack.
+deck hack. The Flow master's own VFP tables are calibrated separately
+(Spike 004).
 
-Verified on Flow 2025.10 with both slaves on flow (demo config, Q0_MULT=1.0):
-converged in 7 of 12 iterations, tolerance 0.005:
+Verified on Flow 2025.10 — **all-real** (master + both slaves on flow,
+relaxation 0.4, Q0_MULT=1.0): converged in 12 of 20 iterations, tolerance
+0.005:
 
-| Iteration | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| Residual | 415.3% | 40.7% | 13.9% | 5.1% | 1.9% | 0.72% | 0.27% |
+| Iteration | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Residual | 455% | 77% | 33% | 22% | 12% | 8.1% | 5.3% | 3.4% | 2.1% | 1.3% | 0.79% | 0.48% |
 
-Final Flow rates show the expected depletion decline across years:
+Final Flow rates show the expected depletion decline across years; final
+master constraints (2024) honour the network with all wells delivering:
+N-P1 BHP 306.5, N-P2 ~326, H-P1 289.8, H-P2 ~302 bar — all below the
+350/315 bar slave caps:
 
 | Well | 2024 | 2025 | 2026 |
 |---|---:|---:|---:|
-| N-P1 q_liq sm³/d (BHP ~303 bar) | 2431.4 | 1856.1 | 1455.5 |
-| N-P2 q_liq sm³/d (BHP ~323 bar) | 1215.7 | 733.0 | 373.3 |
-| H-P1 q_liq sm³/d (BHP ~286 bar) | 1519.4 | 1176.1 | 928.1 |
-| H-P2 q_liq sm³/d (BHP ~298 bar) | 781.3 | 496.4 | 274.2 |
+| N-P1 q_liq sm³/d | 2286.0 | 1848.3 | 1577.3 |
+| N-P2 q_liq sm³/d | 1006.5 | 679.6 | 457.4 |
+| H-P1 q_liq sm³/d | 1330.2 | 1150.9 | 1043.6 |
+| H-P2 q_liq sm³/d | 559.3 | 446.7 | 368.7 |
 
 `COUPLED_REPORT.txt` names the backends (`slave backends: model_n=flow,
 model_hdn=flow`), and `coupling/exchange/slave_result_<slave>_iteration_NNN.json`
-records the raw/relaxed rate paths and the relaxation factor.
+records the raw/relaxed rate paths and the relaxation factor. The dummy-master
+variant (flow slaves, dummy master) also converges — 8 iterations at
+relaxation 0.6.
 
 Note: `Q0_MULT` scales the dummy slaves' productivity; the Flow backend decks
 have fixed productivity, so with any slave on flow `Q0_MULT` varies only the
@@ -350,11 +370,13 @@ OPM Flow 2025.10 is installed at `/usr/bin/flow`. Verified by spikes:
   production coupling path keeps the external network solver for prescribed
   satellite hydraulic load until either Flow gains that behaviour or an Eclipse
   licence is available. The stateful restart-based slave backend was validated
-  in [Spike 003](spikes/003-opm-model-n-restart/README.md) and is wired into
-  the ERT driver as the optional `model_n` flow backend (see "Hybrid mode"):
-  Flow continues a slave across annual years with per-year BHP constraints and
-  carries cumulative state inside each coupling iteration. Migrating
-  `model_hdn` and the master are the remaining integration steps.
+  in [Spike 003](spikes/003-opm-model-n-restart/README.md) and the real
+  network master in [Spike 004](spikes/004-opm-flow-master/README.md); both
+  are wired into the ERT driver as optional backends, so the all-real
+  realization (Flow master + Flow model_n + Flow model_hdn, prescribed
+  GSATPROD source) runs licence-free today. The remaining production steps
+  are deck substitution (real lift curves instead of calibrated VFP tables)
+  and the licence-time master swap.
 
 ## Configuration reference
 

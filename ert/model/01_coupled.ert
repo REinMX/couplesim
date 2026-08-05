@@ -13,11 +13,11 @@
 -- both slaves -> new rates -> convergence. The prescribed external profile
 -- remains an independent, immutable input to the master at every iteration.
 -- The driver lives in ert/bin/scripts/run_coupled.py; the licence-free model
--- adapter is bin/eclipse_dummy.py. An optional real OPM Flow backend for each
--- slave is selectable per slave via coupling.json ("backend": "flow") or the
--- driver's --backend-model-n flag (model_n only); see README.md "Hybrid mode".
--- See coupling.json and README.md for the work required to replace the rest
--- with real Eclipse or OPM Flow adapters.
+-- adapter is bin/eclipse_dummy.py. Optional real OPM Flow backends for the
+-- master and each slave are selectable via coupling.json ("backend": "flow")
+-- or the driver's --backend-model-n flag (model_n only); see README.md
+-- "Hybrid mode". See coupling.json and README.md for the work required to
+-- replace the rest with real Eclipse or OPM Flow adapters.
 --
 -- Your FMU setups use 100 realizations: set NUM_REALIZATIONS 100 when you
 -- plug in the real decks. For quick local checks keep it small (2) or use:

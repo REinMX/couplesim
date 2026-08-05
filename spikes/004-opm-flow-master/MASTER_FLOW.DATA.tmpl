@@ -1,0 +1,169 @@
+-- Spike 004: real OPM Flow network master for the coupled example.
+-- Four REAL slave wells (N-P1/N-P2/H-P1/H-P2) produce against a shared
+-- subsea network: wells -> PLAT -> MANIFOLD (branch, no VFP) and the trunk
+-- MANIFOLD -> FIELD carries the combined simulated flow through VFP table 2.
+-- The prescribed external satellites enter as the GSATPROD group SAT on the
+-- same manifold (group totals / GCONPROD only on Flow 2025.10, see Spike 002).
+-- OIL/WATER/GAS + DISGAS required: Flow asserts rates.size()==3 for branch
+-- VFPs. Per-year WCONPROD renders the slave rates; per-year GSATPROD renders
+-- the prescribed profile. Year runs Jan-1 to Jan-1 (leap-aware TSTEP).
+RUNSPEC
+TITLE
+  OPM FLOW NETWORK MASTER
+DIMENS
+  5 1 1 /
+OIL
+WATER
+GAS
+DISGAS
+METRIC
+START
+  1 JAN 2024 /
+TABDIMS
+  1 1 /
+EQLDIMS
+  1 /
+WELLDIMS
+  4 1 4 4 /
+NETWORK
+  5 4 /
+VFPPDIMS
+  5 5 2 2 3 2 /
+UNIFIN
+UNIFOUT
+
+GRID
+INIT
+DX
+  5*4000 /
+DY
+  5*4000 /
+DZ
+  5*400 /
+TOPS
+  5*2000 /
+PORO
+  5*0.25 /
+PERMX
+  5*300 /
+PERMY
+  5*300 /
+PERMZ
+  5*30 /
+
+PROPS
+PVTO
+  20.0   50.0 1.15 1.50 /
+  50.0  150.0 1.25 1.20 /
+  90.0  250.0 1.35 1.00
+        400.0 1.33 1.10 /
+/
+PVDG
+   50.0 0.024 0.015
+  150.0 0.008 0.018
+  400.0 0.003 0.025 /
+PVTW
+  300.0 1.02 4.3E-5 0.50 0.0 /
+ROCK
+  300.0 5.0E-5 /
+DENSITY
+  850.0 1010.0 1.0 /
+SWOF
+  0.20 0.000 1.000 0.0
+  0.50 0.066 0.300 0.0
+  0.80 0.265 0.010 0.0
+  1.00 0.470 0.000 0.0 /
+SGOF
+  0.00 0.000 1.000 0.0
+  0.40 0.150 0.200 0.0
+  0.75 0.400 0.000 0.0
+  0.80 0.500 0.000 0.0 /
+
+SOLUTION
+EQUIL
+  2010 350.0 3000.0 0.0 1500.0 0.0 1 1* 0 /
+RSVD
+  2000.0 90.0
+  3000.0 90.0 /
+
+SUMMARY
+FPR
+WOPR
+  'N-P1' 'N-P2' 'H-P1' 'H-P2' /
+WWPR
+  'N-P1' 'N-P2' 'H-P1' 'H-P2' /
+WBHP
+  'N-P1' 'N-P2' 'H-P1' 'H-P2' /
+WTHP
+  'N-P1' 'N-P2' 'H-P1' 'H-P2' /
+GOPR
+  'SAT' /
+GPR
+  'PLAT' 'SAT' 'MANIFOLD' /
+RUNSUM
+
+SCHEDULE
+INCLUDE
+  'vfp_tables_master.inc' /
+GRUPTREE
+  'PLAT' 'MANIFOLD' /
+  'SAT' 'MANIFOLD' /
+  'MANIFOLD' 'FIELD' /
+/
+WELSPECS
+  'N-P1' 'PLAT' 2 1 2010.0 'OIL' /
+  'N-P2' 'PLAT' 4 1 2010.0 'OIL' /
+  'H-P1' 'PLAT' 1 1 2010.0 'OIL' /
+  'H-P2' 'PLAT' 3 1 2010.0 'OIL' /
+/
+COMPDAT
+  'N-P1' 2 1 1 1 'OPEN' 1* 1* 0.2 1* 0.0 1* 'Z' /
+  'N-P2' 4 1 1 1 'OPEN' 1* 1* 0.2 1* 0.0 1* 'Z' /
+  'H-P1' 1 1 1 1 'OPEN' 1* 1* 0.2 1* 0.0 1* 'Z' /
+  'H-P2' 3 1 1 1 'OPEN' 1* 1* 0.2 1* 0.0 1* 'Z' /
+/
+GSATPROD
+  'SAT' __Y1_SAT_OIL_SM3D__ 0.0 __Y1_SAT_GAS_SM3D__ /
+/
+BRANPROP
+  'PLAT' 'MANIFOLD' 9999 /
+  'SAT' 'MANIFOLD' 9999 /
+  'MANIFOLD' 'FIELD' 3 /
+/
+NODEPROP
+  'FIELD' 20.0 /
+  'MANIFOLD' /
+  'PLAT' /
+  'SAT' /
+/
+WCONPROD
+  'N-P1' 'OPEN' 'ORAT' __Y1_N_P1_ORAT__ 3* 1* 50.0 10.0 1 /
+  'N-P2' 'OPEN' 'ORAT' __Y1_N_P2_ORAT__ 3* 1* 50.0 10.0 1 /
+  'H-P1' 'OPEN' 'ORAT' __Y1_H_P1_ORAT__ 3* 1* 50.0 10.0 2 /
+  'H-P2' 'OPEN' 'ORAT' __Y1_H_P2_ORAT__ 3* 1* 50.0 10.0 2 /
+/
+TSTEP
+  366 /
+GSATPROD
+  'SAT' __Y2_SAT_OIL_SM3D__ 0.0 __Y2_SAT_GAS_SM3D__ /
+/
+WCONPROD
+  'N-P1' 'OPEN' 'ORAT' __Y2_N_P1_ORAT__ 3* 1* 50.0 10.0 1 /
+  'N-P2' 'OPEN' 'ORAT' __Y2_N_P2_ORAT__ 3* 1* 50.0 10.0 1 /
+  'H-P1' 'OPEN' 'ORAT' __Y2_H_P1_ORAT__ 3* 1* 50.0 10.0 2 /
+  'H-P2' 'OPEN' 'ORAT' __Y2_H_P2_ORAT__ 3* 1* 50.0 10.0 2 /
+/
+TSTEP
+  365 /
+GSATPROD
+  'SAT' __Y3_SAT_OIL_SM3D__ 0.0 __Y3_SAT_GAS_SM3D__ /
+/
+WCONPROD
+  'N-P1' 'OPEN' 'ORAT' __Y3_N_P1_ORAT__ 3* 1* 50.0 10.0 1 /
+  'N-P2' 'OPEN' 'ORAT' __Y3_N_P2_ORAT__ 3* 1* 50.0 10.0 1 /
+  'H-P1' 'OPEN' 'ORAT' __Y3_H_P1_ORAT__ 3* 1* 50.0 10.0 2 /
+  'H-P2' 'OPEN' 'ORAT' __Y3_H_P2_ORAT__ 3* 1* 50.0 10.0 2 /
+/
+TSTEP
+  365 /
+END
