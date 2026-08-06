@@ -1,0 +1,41 @@
+{
+  "title": "Fast smoke-test config: dummy network master and both slaves (no Flow needed)",
+  "schedule": {
+    "start": "2024-01-01",
+    "years": 3,
+    "steps_per_year": 1
+  },
+  "coupling": {
+    "max_iterations": 12,
+    "tolerance": 0.005,
+    "relaxation": 0.6
+  },
+  "prescribed_network_profiles": {
+    "external_satellite": {
+      "keyword": "GSATPROD",
+      "path": "input/master_network/profiles/gsatprod_external.inc"
+    }
+  },
+  "initial_slave_rates_sm3d": {
+    "N-P1": 500.0,
+    "N-P2": 600.0,
+    "H-P1": 400.0,
+    "H-P2": 450.0
+  },
+  "master": {
+    "model": "master_network",
+    "deck": "MASTER.DATA"
+  },
+  "slaves": {
+    "model_n": {
+      "role": "coupled_slave",
+      "deck": "MODEL_N.DATA",
+      "backend": "dummy"
+    },
+    "model_hdn": {
+      "role": "coupled_slave",
+      "deck": "MODEL_HDN.DATA",
+      "backend": "dummy"
+    }
+  }
+}

@@ -21,6 +21,7 @@ import argparse
 import csv
 import json
 import math
+import os
 import shutil
 import subprocess
 import sys
@@ -66,12 +67,12 @@ def schedule_years(coupling: dict[str, Any]) -> list[int]:
     return list(range(first_year, first_year + count))
 
 
-def parse_q0_mult(runpath: Path, *, allow_default: bool) -> float:
-    """Read ERT's GEN_KW result; explicit demo mode may default to 1.0."""
-    path = runpath / "q0_mult.txt"
+def parse_named_param(runpath: Path, name: str, *, allow_default: bool, default: float = 1.0) -> float:
+    """Read one ERT GEN_KW result file; explicit demo mode may default."""
+    path = runpath / f"{name}.txt"
     if not path.exists():
         if allow_default:
-            return 1.0
+            return default
         raise FileNotFoundError(f"required ERT parameter file is missing: {path}")
     values: list[float] = []
     for raw in path.read_text(encoding="utf-8").splitlines():
@@ -81,12 +82,60 @@ def parse_q0_mult(runpath: Path, *, allow_default: bool) -> float:
         try:
             values.append(float(line.split()[-1]))
         except ValueError as exc:
-            raise ValueError(f"invalid Q0_MULT result row in {path}: {raw}") from exc
+            raise ValueError(f"invalid {name.upper()} result row in {path}: {raw}") from exc
     if len(values) != 1 or not math.isfinite(values[0]) or values[0] <= 0.0:
         raise ValueError(
-            f"expected exactly one finite positive Q0_MULT value in {path}, found {values}"
+            f"expected exactly one finite positive {name.upper()} value in {path}, found {values}"
         )
     return values[0]
+
+
+def parse_q0_mult(runpath: Path, *, allow_default: bool) -> float:
+    """Legacy shared Q0_MULT (applies to both slaves); kept for 01_coupled.ert."""
+    return parse_named_param(runpath, "q0_mult", allow_default=allow_default)
+
+
+def slave_q0_multipliers(runpath: Path, *, allow_default: bool) -> dict[str, float]:
+    """Per-slave productivity multipliers from the ensemble GEN_KW groups.
+
+    Preference order per slave:
+      1. q0_mult_model_<slave>.txt  (02_ensemble_coupled.ert, independent per model)
+      2. q0_mult.txt                (01_coupled.ert, shared legacy group)
+    """
+    multipliers: dict[str, float] = {}
+    for model in ("model_n", "model_hdn"):
+        own = runpath / f"q0_mult_{model}.txt"
+        if own.is_file():
+            multipliers[model] = parse_named_param(
+                runpath, f"q0_mult_{model}", allow_default=False
+            )
+        elif (runpath / "q0_mult.txt").is_file():
+            multipliers[model] = parse_q0_mult(runpath, allow_default=False)
+        elif allow_default:
+            multipliers[model] = 1.0
+        else:
+            raise FileNotFoundError(
+                f"required ERT parameter file is missing for {model} in {runpath} "
+                f"(expected q0_mult_{model}.txt or legacy q0_mult.txt)"
+            )
+    return multipliers
+
+
+def parse_network_choke(runpath: Path, *, allow_default: bool) -> float:
+    """Master-side NETWORK_CHOKE scaling the shared network friction loss.
+
+    Legacy configs (01_coupled.ert) parameterize only Q0_MULT; for those the
+    nominal choke 1.0 applies. The ensemble configs write network_choke.txt
+    via GEN_KW; a missing file there is a hard error outside demo mode.
+    """
+    if (runpath / "network_choke.txt").is_file():
+        return parse_named_param(runpath, "network_choke", allow_default=False)
+    if (runpath / "q0_mult.txt").is_file() or allow_default:
+        return 1.0
+    raise FileNotFoundError(
+        f"required ERT parameter file is missing for the master network in {runpath} "
+        f"(expected network_choke.txt, or a legacy q0_mult.txt config)"
+    )
 
 
 def stage_model(runpath: Path, model: str) -> None:
@@ -116,6 +165,26 @@ def apply_q0_mult(runpath: Path, model: str, multiplier: float) -> None:
         if not math.isfinite(scaled_q0):
             raise ValueError(f"scaled q0_sm3d is non-finite for {model}/{well['name']}")
         well["q0_sm3d"] = round(scaled_q0, 6)
+    path.write_text(json.dumps(spec, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+
+
+def apply_network_choke(runpath: Path, model: str, choke: float) -> None:
+    """Write the ensemble NETWORK_CHOKE into the staged master simspec.
+
+    The choke scales the friction pressure drop of trunk and branch terms;
+    hydrostatic columns are fixed by well TVD. The dummy master applies it;
+    the Spike 004 Flow master decks are rendered without it (documented).
+    """
+    if not math.isfinite(choke) or choke <= 0.0:
+        raise ValueError(f"network choke must be a finite positive number: {choke}")
+    path = runpath / model / "simspec.json"
+    spec = load_json(path)
+    if spec.get("role") != "master":
+        raise ValueError(f"NETWORK_CHOKE can only be applied to the master model: {model}")
+    network = spec.setdefault("network", {})
+    if not network:
+        raise ValueError(f"master model has no network section: {model}")
+    network["choke"] = round(choke, 6)
     path.write_text(json.dumps(spec, indent=2, allow_nan=False) + "\n", encoding="utf-8")
 
 
@@ -492,7 +561,7 @@ def initial_rate_rows(
 def write_report(
     runpath: Path,
     coupling: dict[str, Any],
-    q0_mult: float,
+    parameters: dict[str, float],
     history: list[list[Any]],
     converged: bool,
 ) -> str:
@@ -512,7 +581,9 @@ def write_report(
         "COUPLED RUN REPORT",
         "===================",
         f"runpath            : {runpath}",
-        f"q0_mult            : {q0_mult}",
+        f"q0_mult model_n    : {parameters['q0_mult_model_n']}",
+        f"q0_mult model_hdn  : {parameters['q0_mult_model_hdn']}",
+        f"network_choke      : {parameters['network_choke']}",
         f"master model       : {master_model}",
         f"prescribed profiles : {profile_description}",
         f"slave models       : {slave_description}",
@@ -542,7 +613,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--demo", action="store_true", help="run outside ERT")
     parser.add_argument("--runpath", help="explicit output runpath")
-    parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="coupling configuration JSON")
+    parser.add_argument(
+        "--config",
+        default=os.environ.get("COUPLING_CONFIG") or str(DEFAULT_CONFIG),
+        help="coupling configuration JSON (default: coupling.json, or $COUPLING_CONFIG)",
+    )
     parser.add_argument(
         "--backend-model-n",
         choices=list(ALLOWED_BACKENDS),
@@ -569,7 +644,8 @@ def main() -> int:
     else:
         runpath = Path.cwd()
     validate_runpath(runpath)
-    q0_mult = parse_q0_mult(runpath, allow_default=args.demo)
+    slave_mults = slave_q0_multipliers(runpath, allow_default=args.demo)
+    choke = parse_network_choke(runpath, allow_default=args.demo)
     runpath.mkdir(parents=True, exist_ok=True)
 
     coupling_dir = runpath / "coupling"
@@ -578,17 +654,22 @@ def main() -> int:
     coupling_dir.mkdir(parents=True)
 
     if args.demo and not (runpath / "q0_mult.txt").exists():
-        (runpath / "q0_mult.txt").write_text(f"Q0_MULT  {q0_mult:.6f}\n", encoding="utf-8")
+        (runpath / "q0_mult.txt").write_text(f"Q0_MULT  {slave_mults['model_n']:.6f}\n", encoding="utf-8")
     (runpath / "coupling_config.json").write_text(
         json.dumps(coupling, indent=2, allow_nan=False) + "\n", encoding="utf-8"
     )
-    log(f"runpath: {runpath}   q0_mult: {q0_mult}")
+    log(
+        f"runpath: {runpath}   q0_mult: "
+        f"model_n={slave_mults['model_n']}, model_hdn={slave_mults['model_hdn']}   "
+        f"network_choke: {choke}"
+    )
 
     stage_model(runpath, master_model)
+    apply_network_choke(runpath, master_model, choke)
     previous_rates: dict[str, dict[str, dict[int, float]]] = {}
     for name in slaves:
         stage_model(runpath, name)
-        apply_q0_mult(runpath, name, q0_mult)
+        apply_q0_mult(runpath, name, slave_mults[name])
         previous_rates[name] = initial_rate_rows(runpath, coupling, name, years)
 
     max_iterations = int(coupling["coupling"]["max_iterations"])
@@ -631,7 +712,17 @@ def main() -> int:
         writer.writerow(["iteration", "max_fixed_point_residual"])
         writer.writerows(history)
 
-    report = write_report(runpath, coupling, q0_mult, history, converged)
+    report = write_report(
+        runpath,
+        coupling,
+        {
+            "q0_mult_model_n": slave_mults["model_n"],
+            "q0_mult_model_hdn": slave_mults["model_hdn"],
+            "network_choke": choke,
+        },
+        history,
+        converged,
+    )
     print(report, end="")
     if not converged:
         print("COUPLED RUN FAILED: maximum iterations reached without convergence", file=sys.stderr)

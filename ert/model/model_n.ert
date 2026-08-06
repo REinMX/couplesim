@@ -1,0 +1,39 @@
+-- ============================================================================
+-- Standalone ensemble for model_n.
+--
+-- One realization = ONE model: model_n runs once against static reference-IPR
+-- constraints (p_bhp = p_bhp0, no backpressure) built from its simspec and
+-- the initial rates in coupling.json. This is the per-model quality check
+-- (like your FMU setup for model_n alone); the coupled loop that iterates
+-- master + both slaves belongs to 02_ensemble_coupled.ert.
+--
+-- Simulator backend comes from coupling.json (default: real OPM Flow;
+-- "dummy" keeps the licence-free path). Quick smoke without Flow:
+--     COUPLING_CONFIG=../../configs/coupling.fast.json ert test_run model_n.ert
+--
+-- Uncertain parameter: Q0_MULT_MODEL_N (productivity multiplier, the role
+-- permeability/rock parameters play in your 100-realization FMU setups).
+-- ============================================================================
+
+NUM_REALIZATIONS      10
+RANDOM_SEED           20260805
+
+QUEUE_SYSTEM          LOCAL
+QUEUE_OPTION LOCAL MAX_RUNNING 2
+
+DEFINE  <CASE_DIR>      model_n
+
+RUNPATH       ../../output/<CASE_DIR>/realization-<IENS>/iter-<ITER>
+ENSPATH       ../../output/<CASE_DIR>/storage
+RUNPATH_FILE  ../../output/<CASE_DIR>/runpath_file
+
+-- FMU convention: ECLBASE is a path *inside* the runpath.
+ECLBASE       eclipse/model/MODEL_N
+
+-- --- Uncertain parameters --------------------------------------------------
+GEN_KW  Q0_MULT_MODEL_N  ../../input/templates/q0_mult_model_n.tmpl  q0_mult_model_n.txt  ../../input/distributions/q0_mult_model_n_priors.txt
+
+-- --- The forward model -----------------------------------------------------
+INSTALL_JOB  RUN_MODEL_N  ../bin/jobs/RUN_MODEL_N
+
+FORWARD_MODEL RUN_MODEL_N

@@ -186,6 +186,9 @@ def run_master(
     years = schedule_years(coupling)
     year_set = set(years)
     network = spec["network"]
+    choke = float(network.get("choke", 1.0))
+    if not math.isfinite(choke) or choke <= 0.0:
+        raise ValueError(f"network choke must be a finite positive number: {choke}")
     coupling_dir = model_dir.parent / "coupling"
     exchange_dir = coupling_dir / "exchange"
     exchange_dir.mkdir(parents=True, exist_ok=True)
@@ -271,16 +274,22 @@ def run_master(
         total_rate = total_by_year[year]
         manifold_pressure = (
             float(network["outlet_pressure_bar"])
-            + float(network["trunk_friction_a_bar_sm3d"]) * total_rate
-            + float(network["trunk_friction_b_bar_sm3d2"]) * total_rate * total_rate
+            + choke
+            * (
+                float(network["trunk_friction_a_bar_sm3d"]) * total_rate
+                + float(network["trunk_friction_b_bar_sm3d2"]) * total_rate * total_rate
+            )
         )
         for slave, wells in sorted(by_slave.items()):
             for well in wells:
                 q_well = rates_by_slave[slave][(well["name"], year)]
                 p_wh = (
                     manifold_pressure
-                    + float(network["branch_friction_a_bar_sm3d"]) * q_well
-                    + float(network["branch_friction_b_bar_sm3d2"]) * q_well * q_well
+                    + choke
+                    * (
+                        float(network["branch_friction_a_bar_sm3d"]) * q_well
+                        + float(network["branch_friction_b_bar_sm3d2"]) * q_well * q_well
+                    )
                 )
                 hydrostatic = float(network["fluid_density_kg_m3"]) * GRAVITY * float(well["tvd_m"]) * 1e-5
                 p_bhp = p_wh + hydrostatic

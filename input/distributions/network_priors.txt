@@ -1,0 +1,6 @@
+-- ERT prior distribution for the master network hydraulic parameter.
+-- Syntax: <NAME> <DISTRIBUTION> <args...>
+-- NETWORK_CHOKE scales the friction pressure drop of the shared subsea
+-- network solved by the master (trunk + branch terms; hydrostatics are
+-- fixed by well TVD). 1.0 = the nominal network in simspec.json.
+NETWORK_CHOKE  UNIFORM   0.8  1.2

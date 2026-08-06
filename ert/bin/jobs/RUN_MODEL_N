@@ -1,0 +1,7 @@
+-- ERT forward-model step for a standalone model_n realization.
+-- Runs model_n once against static reference-IPR constraints (see
+-- ert/bin/scripts/run_standalone.py). The simulator backend comes from
+-- coupling.json (default: real OPM Flow).
+EXECUTABLE  ../scripts/run_standalone.py
+-- Note: "--" starts a comment in ERT job syntax, so the flag must be quoted.
+ARGLIST     "--model" model_n

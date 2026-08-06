@@ -1,0 +1,40 @@
+-- ============================================================================
+-- Standalone ensemble for the master network model.
+--
+-- One realization = ONE model: the external network solver (dummy master)
+-- consumes the static slave rates from coupling.json initial_slave_rates_sm3d
+-- plus the prescribed GSATPROD profile, and returns the network constraints
+-- (manifold / wellhead / BHP) for both slaves. This is the per-model quality
+-- check for the network hydraulics alone; the coupled loop that iterates
+-- master + slaves belongs to 02_ensemble_coupled.ert.
+--
+-- Uncertain parameter: NETWORK_CHOKE scales the friction pressure drop of
+-- trunk + branch terms (hydrostatics are fixed by well TVD).
+--
+-- Run:      ert test_run master_network.ert
+--           ert ensemble_experiment master_network.ert
+-- Quick smoke without Flow: COUPLING_CONFIG=../../configs/coupling.fast.json
+-- ============================================================================
+
+NUM_REALIZATIONS      10
+RANDOM_SEED           20260805
+
+QUEUE_SYSTEM          LOCAL
+QUEUE_OPTION LOCAL MAX_RUNNING 2
+
+DEFINE  <CASE_DIR>      master_network
+
+RUNPATH       ../../output/<CASE_DIR>/realization-<IENS>/iter-<ITER>
+ENSPATH       ../../output/<CASE_DIR>/storage
+RUNPATH_FILE  ../../output/<CASE_DIR>/runpath_file
+
+-- FMU convention: ECLBASE is a path *inside* the runpath.
+ECLBASE       eclipse/model/MASTER
+
+-- --- Uncertain parameters --------------------------------------------------
+GEN_KW  NETWORK_CHOKE  ../../input/templates/network_choke.tmpl  network_choke.txt  ../../input/distributions/network_priors.txt
+
+-- --- The forward model -----------------------------------------------------
+INSTALL_JOB  RUN_MASTER  ../bin/jobs/RUN_MASTER
+
+FORWARD_MODEL RUN_MASTER

@@ -1,0 +1,6 @@
+-- ERT forward-model step for a standalone master_network realization.
+-- Runs the external network solver once against static slave rates from
+-- coupling.json (see ert/bin/scripts/run_standalone.py).
+EXECUTABLE  ../scripts/run_standalone.py
+-- Note: "--" starts a comment in ERT job syntax, so the flag must be quoted.
+ARGLIST     "--model" master_network

@@ -1,0 +1,76 @@
+-- ============================================================================
+-- Stage 2: coupled multi-model ENSEMBLE (master dummy network + two slaves).
+--
+-- One realization = THREE models run "at the same time" through a single
+-- forward-model step (RUN_COUPLED):
+--     master_network  dummy reservoir + shared subsea network      (master)
+--                     consumes prescribed external GSATPROD profiles PLUS
+--                     simulated production from both slaves
+--     model_n         dynamic reservoir/well simulation             (slave)
+--     model_hdn       dynamic reservoir/well simulation             (slave)
+--
+-- Uncertain parameters are INDEPENDENT per model (each realization draws its
+-- own values from every group):
+--     Q0_MULT_MODEL_N    productivity multiplier for model_n
+--     Q0_MULT_MODEL_HDN  productivity multiplier for model_hdn
+--     NETWORK_CHOKE      friction-pressure-drop scale of the shared network
+--                        solved by the master
+--
+-- Exchange loop: slave rates -> master network -> pressure constraints ->
+-- both slaves -> new rates -> convergence (fixed-point relaxation).
+--
+-- Slaves run real OPM Flow by default (coupling.json backend: flow); the
+-- licence-free dummy path is one config edit away, and the same decks are
+-- Eclipse-standard syntax for when the licence arrives. The per-model
+-- quality-check ensembles (one model alone) are master_network.ert,
+-- model_n.ert and model_hdn.ert. After a run, aggregate all realizations
+-- with:
+--     ert/bin/scripts/collect_ensemble.py --case-dir output/02_coupled
+--
+-- Your FMU setups use 100 realizations: set NUM_REALIZATIONS 100 when you
+-- plug in the real decks. For quick local checks keep it small (2) or use:
+--     ert test_run 02_ensemble_coupled.ert
+--     COUPLING_CONFIG=../../configs/coupling.fast.json ert test_run 02_ensemble_coupled.ert
+-- ============================================================================
+
+NUM_REALIZATIONS      10
+RANDOM_SEED           20260805
+
+QUEUE_SYSTEM          LOCAL
+-- Memory, not cores, is the binding constraint on a small box; with real
+-- simulators each slot also holds one flow/eclipse process per model.
+QUEUE_OPTION LOCAL MAX_RUNNING 2
+
+DEFINE  <CASE_DIR>      02_coupled
+
+RUNPATH       ../../output/<CASE_DIR>/realization-<IENS>/iter-<ITER>
+ENSPATH       ../../output/<CASE_DIR>/storage
+RUNPATH_FILE  ../../output/<CASE_DIR>/runpath_file
+
+-- FMU convention placeholder; each model writes its own outputs below the
+-- runpath (runpath/<model>/ and runpath/coupling/flow_<model>/...). The
+-- ensemble response is collected from coupling/slave_rates_*.csv by
+-- collect_ensemble.py (ERT SUMMARY is wired per model in the standalone
+-- configs, where one ECLBASE per runpath applies).
+ECLBASE       eclipse/model/MASTER
+
+-- --- Uncertain parameters --------------------------------------------------
+-- One group per model: every realization draws an independent sample for
+-- each slave and for the master network. GEN_KW parameter names must be
+-- unique across the config, so each group has its own priors file.
+GEN_KW  Q0_MULT_MODEL_N    ../../input/templates/q0_mult_model_n.tmpl    q0_mult_model_n.txt    ../../input/distributions/q0_mult_model_n_priors.txt
+GEN_KW  Q0_MULT_MODEL_HDN  ../../input/templates/q0_mult_model_hdn.tmpl  q0_mult_model_hdn.txt  ../../input/distributions/q0_mult_model_hdn_priors.txt
+GEN_KW  NETWORK_CHOKE      ../../input/templates/network_choke.tmpl      network_choke.txt      ../../input/distributions/network_priors.txt
+
+-- --- The forward model -----------------------------------------------------
+-- One step per realization: the coupled driver stages the three models
+-- into the runpath and runs the master/slave coupling loop.
+INSTALL_JOB  RUN_COUPLED  ../bin/jobs/RUN_COUPLED
+
+FORWARD_MODEL RUN_COUPLED
+
+-- --- Responses -------------------------------------------------------------
+-- With real simulators each model writes its own summary below the runpath;
+-- list the per-model keys you want ERT to register once the ECLBASE
+-- convention is aligned per model, e.g.:
+-- SUMMARY  WOPR:N-P1  WBHP:N-P1  FPR

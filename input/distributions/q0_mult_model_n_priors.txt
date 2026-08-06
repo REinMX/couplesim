@@ -1,0 +1,4 @@
+-- ERT prior distribution for the model_n productivity multiplier.
+-- Syntax: <NAME> <DISTRIBUTION> <args...>
+-- One parameter per file: GEN_KW names must be unique across the config.
+Q0_MULT_MODEL_N   UNIFORM   0.8  1.2

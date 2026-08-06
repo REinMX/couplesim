@@ -231,15 +231,27 @@ That file is the primary acceptance artifact for the required topology.
 ```text
 coupled-sim-eclipse/
 ├── README.md
-├── coupling.json
+├── coupling.json                # hybrid default: dummy master + both Flow slaves
+├── configs/coupling.fast.json   # all-dummy smoke config (no Flow needed)
 ├── run_demo.sh
 ├── bin/
 │   └── eclipse_dummy.py
 ├── ert/
-│   ├── model/01_coupled.ert
+│   ├── model/
+│   │   ├── 01_coupled.ert               # legacy two-realization smoke
+│   │   ├── 02_ensemble_coupled.ert      # THE coupled ensemble (per-model GEN_KW)
+│   │   ├── master_network.ert           # standalone ensemble, master alone
+│   │   ├── model_n.ert                  # standalone ensemble, model_n alone
+│   │   └── model_hdn.ert                # standalone ensemble, model_hdn alone
 │   └── bin/
 │       ├── jobs/RUN_COUPLED
-│       └── scripts/run_coupled.py
+│       ├── jobs/RUN_MASTER
+│       ├── jobs/RUN_MODEL_N
+│       ├── jobs/RUN_MODEL_HDN
+│       └── scripts/
+│           ├── run_coupled.py           # coupled driver (one realization = 3 models)
+│           ├── run_standalone.py        # one-model driver (per-model ensembles)
+│           └── collect_ensemble.py      # ensemble_results.csv + P10/P50/P90
 ├── input/
 │   ├── master_network/
 │   │   ├── MASTER.DATA
@@ -252,10 +264,11 @@ coupled-sim-eclipse/
 │   ├── model_hdn/
 │   │   ├── MODEL_HDN.DATA
 │   │   └── simspec.json
-│   ├── templates/q0_mult.tmpl
-│   └── distributions/q0_priors.txt
+│   ├── templates/          # one GEN_KW template per parameter
+│   └── distributions/      # one priors file per parameter group
 └── tests/
-    └── test_coupled_workflow.py
+    ├── test_coupled_workflow.py
+    └── test_ensemble_setup.py
 ```
 
 Generated runpaths are written below `output/` and ignored by Git.
@@ -308,35 +321,72 @@ It verifies that:
 - non-convergence fails the forward model; and
 - the report states all three network-input categories.
 
-## ERT execution
+## Ensembles (ERT + FMU pattern)
 
-The example was developed against ERT 23.0.1 in the existing local venv:
+The example follows the FMU convention of **one independent ERT file per
+model**, with the model inputs in project folders under `input/<model>/`:
+
+| Config | What one realization runs |
+|---|---|
+| `ert/model/master_network.ert` | the master alone (network hydraulics, `NETWORK_CHOKE`) |
+| `ert/model/model_n.ert` | `model_n` alone (productivity, `Q0_MULT_MODEL_N`) |
+| `ert/model/model_hdn.ert` | `model_hdn` alone (productivity, `Q0_MULT_MODEL_HDN`) |
+| `ert/model/02_ensemble_coupled.ert` | **the coupled system**: master + both slaves in one realization |
+
+The standalone configs are the per-model quality checks (the role your
+100-realization FMU setups play for each model). The coupled config is the
+production ensemble: every realization draws an **independent** sample from
+each parameter group and runs the full master/slave fixed-point loop with the
+chosen simulator backends:
+
+```text
+GEN_KW Q0_MULT_MODEL_N    -> model_n simspec q0     (slave 1 productivity)
+GEN_KW Q0_MULT_MODEL_HDN  -> model_hdn simspec q0   (slave 2 productivity)
+GEN_KW NETWORK_CHOKE      -> master simspec network (shared friction loss)
+```
+
+Backends come from `coupling.json`: the repo default is the hybrid — dummy
+master network solver + both slaves on **real OPM Flow** (Eclipse-compatible
+decks, so the same files run under Eclipse when the licence arrives). Set
+`"backend": "dummy"` per slave (or use `configs/coupling.fast.json` via
+`COUPLING_CONFIG`) for the licence-free path.
+
+Run the coupled ensemble (from `ert/model/`):
 
 ```bash
 cd ert/model
 PATH=/home/javier/projects/ert_fmu/.venv/bin:$PATH \
-  ert test_run 01_coupled.ert
-
+  ert test_run 02_ensemble_coupled.ert        # 1 realization, parse+exec gate
 PATH=/home/javier/projects/ert_fmu/.venv/bin:$PATH \
-  ert ensemble_experiment 01_coupled.ert
+  ert ensemble_experiment 02_ensemble_coupled.ert   # all realizations
+# fast smoke without Flow (all-dummy config):
+COUPLING_CONFIG=/absolute/path/configs/coupling.fast.json \
+  PATH=/home/javier/projects/ert_fmu/.venv/bin:$PATH \
+  ert ensemble_experiment 02_ensemble_coupled.ert
 ```
 
-Verification on ERT 23.0.1:
+`COUPLING_CONFIG` is an absolute path (the driver resolves it from the
+realization runpath). `NUM_REALIZATIONS` is `10`; set `100` when you plug in
+the real FMU decks.
 
-- `ert test_run`: 1/1 realization passed;
-- `ert ensemble_experiment`: 2/2 realizations passed;
-- realization 0 converged in 9/12 iterations and realization 1 in 8/12,
-  using the unrelaxed fixed-point residual; and
-- sampled `Q0_MULT` values `0.836549` and `0.999312` propagated through both
-  reservoir slaves while the prescribed external profile remained unchanged.
+Aggregate the completed realizations (params + iterations + final rates +
+nearest-rank P10/P50/P90):
 
-`NUM_REALIZATIONS` is intentionally `2` for a cheap example. Change it to
-`100` when integrating the real FMU ensembles. `Q0_MULT` is sampled from
-`UNIFORM 0.8 1.2` and scales the productivity of both reservoir slaves; the
-prescribed external profiles remain unchanged.
+```bash
+cd /home/javier/projects/coupled-sim-eclipse
+python3 ert/bin/scripts/collect_ensemble.py --case-dir output/02_coupled
+```
 
-ERT owns the outer ensemble parallelism. The Python forward-model job owns the
-inner, per-realization model coupling.
+Verified on ERT 23.0.1 + flow 2026.04:
+
+- `ert test_run 02_ensemble_coupled.ert` (hybrid, real Flow slaves): 1/1
+  finished, converged in 7/12 iterations (residual 4.17 -> 0.0034, tol 0.005);
+- `ert ensemble_experiment` (3 realizations, dummy smoke): 3/3 finished, 9
+  iterations each, `ensemble_results.csv` + `ensemble_summary.csv` produced;
+- standalone `ert test_run` for all three per-model configs: 1/1 each; the
+  `model_n` standalone with the real Flow backend runs the full 2024-2026
+  restart chain against static reference-IPR constraints.
+
 
 ## Mapping to the real FMU/Eclipse setup
 
@@ -411,8 +461,21 @@ FMU model configuration.
 
 - `GEN_KW` input paths are relative to `ert/model/`.
 - `RUNPATH`, `ENSPATH`, and `RUNPATH_FILE` are relative to `ert/model/`.
-- the job `EXECUTABLE` is relative to `ert/bin/jobs/RUN_COUPLED`.
-- `GEN_KW` writes `q0_mult.txt` into each realization runpath.
+- the job `EXECUTABLE` is relative to `ert/bin/jobs/<JOB>`.
+- `GEN_KW` writes `<group>.txt` into each realization runpath; the drivers
+  resolve `q0_mult_model_n.txt`, `q0_mult_model_hdn.txt`, `network_choke.txt`
+  (legacy shared `q0_mult.txt` still works).
+- **GEN_KW parameter names must be unique across the whole config**: a priors
+  file listing two names cannot be shared by two groups — one priors file per
+  group (`input/distributions/q0_mult_model_n_priors.txt`, etc.).
+- **`--` starts a comment in ERT job syntax**: a flag in `ARGLIST` must be
+  quoted (`ARGLIST "--model" model_n`), exactly like the ert_fmu lab's
+  `MAKE_RELPERM` job.
+- the job script must be executable (`chmod +x`).
+- `COUPLING_CONFIG` overrides the coupling JSON for the drivers; it must be an
+  absolute path because it is resolved from the realization runpath.
 - launch ERT with its venv on `PATH` so `fm_dispatch.py` is available.
 - use `ert test_run` as the real parse/execution gate; `ert lint` alone is not
   sufficient for this ERT version.
+- ERT owns the outer ensemble parallelism; the Python forward-model job owns
+  the inner, per-realization model coupling.
