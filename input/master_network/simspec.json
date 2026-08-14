@@ -12,23 +12,23 @@
   },
   "wells": [
     {
-      "name": "N-P1",
-      "slave": "model_n",
+      "name": "A-P1",
+      "slave": "model_a",
       "tvd_m": 3100.0
     },
     {
-      "name": "N-P2",
-      "slave": "model_n",
+      "name": "A-P2",
+      "slave": "model_a",
       "tvd_m": 3350.0
     },
     {
-      "name": "H-P1",
-      "slave": "model_hdn",
+      "name": "B-P1",
+      "slave": "model_b",
       "tvd_m": 2900.0
     },
     {
-      "name": "H-P2",
-      "slave": "model_hdn",
+      "name": "B-P2",
+      "slave": "model_b",
       "tvd_m": 3050.0
     }
   ]

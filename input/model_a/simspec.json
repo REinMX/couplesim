@@ -1,10 +1,10 @@
 {
-  "model": "model_n",
+  "model": "model_a",
   "role": "slave",
-  "deck": "MODEL_N.DATA",
+  "deck": "MODEL_A.DATA",
   "wells": [
     {
-      "name": "N-P1",
+      "name": "A-P1",
       "q0_sm3d": 250.0,
       "p_res0_bar": 325.0,
       "p_bhp0_bar": 300.0,
@@ -12,7 +12,7 @@
       "gor_sm3_sm3": 120.0
     },
     {
-      "name": "N-P2",
+      "name": "A-P2",
       "q0_sm3d": 300.0,
       "p_res0_bar": 340.0,
       "p_bhp0_bar": 300.0,

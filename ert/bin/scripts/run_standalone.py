@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Run ONE model of the coupled example as a standalone ERT realization.
 
-The per-model ERT configs (master_network.ert, model_n.ert, model_hdn.ert)
+The per-model ERT configs (master_network.ert, model_a.ert, model_b.ert)
 mirror the FMU convention of one independent ERT file per model. Each
 realization stages ``input/<model>/``, applies that model's own GEN_KW
-parameter (``Q0_MULT_MODEL_<N|HDN>`` for the slaves, ``NETWORK_CHOKE`` for
+parameter (``Q0_MULT_MODEL_<A|B>`` for the slaves, ``NETWORK_CHOKE`` for
 the master) and runs the model ONCE against static boundary conditions:
 
   slave  : fixed network constraints from the simspec reference BHP
@@ -12,7 +12,7 @@ the master) and runs the model ONCE against static boundary conditions:
   master : fixed slave rates from coupling.json ``initial_slave_rates_sm3d``
 
 This is the per-model quality check (like your 100-realization FMU runs for
-model_n/model_hdn alone). The coupled loop -- master and both slaves
+model_a/model_b alone). The coupled loop -- master and both slaves
 iterating to convergence in one realization -- belongs to
 02_ensemble_coupled.ert / run_coupled.py.
 
@@ -38,10 +38,12 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from run_coupled import (  # noqa: E402
     DEFAULT_CONFIG,
+    ECLIPSE_ADAPTER,
     FLOW_ADAPTER,
     ROOT,
     apply_network_choke,
     apply_q0_mult,
+    backend_adapter_args,
     initial_rate_rows,
     load_json,
     parse_network_choke,
@@ -51,8 +53,6 @@ from run_coupled import (  # noqa: E402
     validate_runpath,
     validate_topology,
 )
-
-ALLOWED_MODELS = ("master_network", "model_n", "model_hdn")
 
 
 def log(message: str) -> None:
@@ -90,36 +90,38 @@ def static_constraint_rows(
     return rows
 
 
-def run_flow_slave_standalone(runpath: Path, model: str) -> None:
-    """Run the real OPM Flow slave once against the static constraints."""
-    if not FLOW_ADAPTER.is_file():
-        raise FileNotFoundError(
-            f"flow backend requires the Spike 003 adapter at {FLOW_ADAPTER}"
-        )
+def run_adapter_slave_standalone(
+    runpath: Path, model: str, backend: str, coupling: dict[str, Any]
+) -> None:
+    """Run a real-simulator slave once against the static constraints."""
+    adapter, extra_args, _ = backend_adapter_args(model, coupling, backend)
+    if not Path(adapter).is_file():
+        raise FileNotFoundError(f"{backend} backend requires the adapter at {adapter}")
     constraints = runpath / "coupling" / f"network_constraints_{model}.csv"
-    run_dir = runpath / "coupling" / f"flow_{model}" / "standalone"
+    run_dir = runpath / "coupling" / f"{backend}_{model}" / "standalone"
     if run_dir.exists():
         shutil.rmtree(run_dir)
     run_dir.mkdir(parents=True)
     subprocess.run(
         [
             sys.executable,
-            str(FLOW_ADAPTER),
+            str(adapter),
             "--constraints",
             str(constraints),
             "--output-dir",
             str(run_dir),
             "--model",
             model,
+            *extra_args,
         ],
         check=True,
         cwd=runpath,
     )
     raw_rates = run_dir / f"slave_rates_{model}.csv"
     if not raw_rates.is_file():
-        raise FileNotFoundError(f"flow backend did not produce slave rates: {raw_rates}")
+        raise FileNotFoundError(f"{backend} backend did not produce slave rates: {raw_rates}")
     shutil.copy2(raw_rates, runpath / "coupling" / f"slave_rates_{model}.csv")
-    log(f"{model} (flow backend, standalone): {runpath / 'coupling' / f'slave_rates_{model}.csv'}")
+    log(f"{model} ({backend} backend, standalone): {runpath / 'coupling' / f'slave_rates_{model}.csv'}")
 
 
 def write_slave_report(runpath: Path, model: str, multiplier: float, backend: str) -> str:
@@ -180,7 +182,7 @@ def write_master_report(runpath: Path, choke: float, slaves: list[str]) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", choices=list(ALLOWED_MODELS), required=True)
+    parser.add_argument("--model", required=True, help="model to run: master_network or a coupled slave")
     parser.add_argument("--runpath", help="explicit output runpath (default: cwd)")
     parser.add_argument(
         "--config",
@@ -191,6 +193,11 @@ def main() -> int:
 
     coupling = load_json(Path(args.config))
     validate_topology(coupling)
+    allowed_models = ("master_network", *coupling["slaves"])
+    if args.model not in allowed_models:
+        raise ValueError(
+            f"unknown standalone model {args.model!r}; allowed values are {allowed_models}"
+        )
     runpath = Path(args.runpath).resolve() if args.runpath else Path.cwd()
     validate_runpath(runpath)
     runpath.mkdir(parents=True, exist_ok=True)
@@ -214,7 +221,7 @@ def main() -> int:
             )
         choke = parse_network_choke(runpath, allow_default=True)
         apply_network_choke(runpath, args.model, choke)
-        for slave in ("model_n", "model_hdn"):
+        for slave in coupling["slaves"]:
             stage_model(runpath, slave)
             initial_rate_rows(runpath, coupling, slave, years)
         subprocess.run(
@@ -233,11 +240,11 @@ def main() -> int:
         print("STANDALONE MASTER COMPLETE")
         return 0
 
-    multipliers = slave_q0_multipliers(runpath, allow_default=True)
+    multipliers = slave_q0_multipliers(runpath, coupling["slaves"], allow_default=True)
     multiplier = multipliers[args.model]
     apply_q0_mult(runpath, args.model, multiplier)
     backend = str(coupling["slaves"][args.model].get("backend", "dummy"))
-    if backend not in ("dummy", "flow"):
+    if backend not in ("dummy", "flow", "eclipse"):
         raise ValueError(f"slave {args.model} has unsupported backend {backend!r}")
 
     header = [
@@ -258,8 +265,8 @@ def main() -> int:
         writer.writerow(header)
         writer.writerows(static_constraint_rows(runpath, coupling, args.model, years))
 
-    if backend == "flow":
-        run_flow_slave_standalone(runpath, args.model)
+    if backend in ("flow", "eclipse"):
+        run_adapter_slave_standalone(runpath, args.model, backend, coupling)
     else:
         subprocess.run(
             [

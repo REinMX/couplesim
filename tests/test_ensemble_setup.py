@@ -9,14 +9,15 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+LEGACY_CONFIG = ROOT / "configs" / "coupling.legacy-gsatprod.json"
 DRIVER = ROOT / "ert" / "bin" / "scripts" / "run_coupled.py"
 STANDALONE = ROOT / "ert" / "bin" / "scripts" / "run_standalone.py"
 COLLECT = ROOT / "ert" / "bin" / "scripts" / "collect_ensemble.py"
 SCRIPTS = ROOT / "ert" / "bin" / "scripts"
 
 sys.path.insert(0, str(SCRIPTS))
-import collect_ensemble  # noqa: E402
-import run_coupled  # noqa: E402
+import collect_ensemble
+import run_coupled
 
 
 def read_csv(path: Path) -> list[dict[str, str]]:
@@ -25,7 +26,7 @@ def read_csv(path: Path) -> list[dict[str, str]]:
 
 
 def dummy_config() -> dict:
-    config = json.loads((ROOT / "coupling.json").read_text(encoding="utf-8"))
+    config = json.loads((LEGACY_CONFIG).read_text(encoding="utf-8"))
     for slave in config["slaves"]:
         config["slaves"][slave]["backend"] = "dummy"
     return config
@@ -45,25 +46,31 @@ class ParameterParsingTest(unittest.TestCase):
 
     def test_per_model_parameter_files_take_precedence(self) -> None:
         (self.dir / "q0_mult.txt").write_text("Q0_MULT  0.5\n", encoding="utf-8")
-        (self.dir / "q0_mult_model_n.txt").write_text(
-            "Q0_MULT_MODEL_N  0.85\n", encoding="utf-8"
+        (self.dir / "q0_mult_model_a.txt").write_text(
+            "Q0_MULT_MODEL_A  0.85\n", encoding="utf-8"
         )
-        (self.dir / "q0_mult_model_hdn.txt").write_text(
-            "Q0_MULT_MODEL_HDN  1.15\n", encoding="utf-8"
+        (self.dir / "q0_mult_model_b.txt").write_text(
+            "Q0_MULT_MODEL_B  1.15\n", encoding="utf-8"
         )
-        mults = run_coupled.slave_q0_multipliers(self.dir, allow_default=False)
-        self.assertAlmostEqual(mults["model_n"], 0.85)
-        self.assertAlmostEqual(mults["model_hdn"], 1.15)
+        mults = run_coupled.slave_q0_multipliers(
+            self.dir, dummy_config()["slaves"], allow_default=False
+        )
+        self.assertAlmostEqual(mults["model_a"], 0.85)
+        self.assertAlmostEqual(mults["model_b"], 1.15)
 
     def test_legacy_file_falls_back_for_both_slaves(self) -> None:
         (self.dir / "q0_mult.txt").write_text("Q0_MULT  0.9\n", encoding="utf-8")
-        mults = run_coupled.slave_q0_multipliers(self.dir, allow_default=False)
-        self.assertAlmostEqual(mults["model_n"], 0.9)
-        self.assertAlmostEqual(mults["model_hdn"], 0.9)
+        mults = run_coupled.slave_q0_multipliers(
+            self.dir, dummy_config()["slaves"], allow_default=False
+        )
+        self.assertAlmostEqual(mults["model_a"], 0.9)
+        self.assertAlmostEqual(mults["model_b"], 0.9)
 
     def test_missing_parameters_raise(self) -> None:
         with self.assertRaises(FileNotFoundError):
-            run_coupled.slave_q0_multipliers(self.dir, allow_default=False)
+            run_coupled.slave_q0_multipliers(
+                self.dir, dummy_config()["slaves"], allow_default=False
+            )
 
     def test_choke_defaults_in_demo_mode(self) -> None:
         self.assertAlmostEqual(
@@ -91,18 +98,18 @@ class ParameterParsingTest(unittest.TestCase):
         self.assertAlmostEqual(spec["network"]["choke"], 1.25)
 
     def test_apply_network_choke_rejects_slave_role_and_bad_values(self) -> None:
-        model_dir = self.dir / "model_n"
+        model_dir = self.dir / "model_a"
         model_dir.mkdir()
         (model_dir / "simspec.json").write_text(
-            json.dumps({"model": "model_n", "role": "slave", "wells": []}),
+            json.dumps({"model": "model_a", "role": "slave", "wells": []}),
             encoding="utf-8",
         )
         with self.assertRaises(ValueError):
-            run_coupled.apply_network_choke(self.dir, "model_n", 1.1)
+            run_coupled.apply_network_choke(self.dir, "model_a", 1.1)
         with self.assertRaises(ValueError):
-            run_coupled.apply_network_choke(self.dir, "model_n", 0.0)
+            run_coupled.apply_network_choke(self.dir, "model_a", 0.0)
         with self.assertRaises(ValueError):
-            run_coupled.apply_network_choke(self.dir, "model_n", float("nan"))
+            run_coupled.apply_network_choke(self.dir, "model_a", float("nan"))
 
 
 class StandaloneRunTest(unittest.TestCase):
@@ -143,21 +150,21 @@ class StandaloneRunTest(unittest.TestCase):
         runpath = self.temp_dir / "slave_n"
         runpath.mkdir()
         completed = self.run_standalone(
-            "model_n",
+            "model_a",
             runpath,
-            param_files={"q0_mult_model_n.txt": "Q0_MULT_MODEL_N  0.9\n"},
+            param_files={"q0_mult_model_a.txt": "Q0_MULT_MODEL_A  0.9\n"},
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
         report = (runpath / "STANDALONE_REPORT.txt").read_text(encoding="utf-8")
         self.assertIn("STANDALONE SLAVE REPORT", report)
         self.assertIn("q0_mult    : 0.9", report)
-        rows = read_csv(runpath / "coupling" / "slave_rates_model_n.csv")
+        rows = read_csv(runpath / "coupling" / "slave_rates_model_a.csv")
         by_well_year = {(row["well"], row["year"]): float(row["q_liq_sm3d"]) for row in rows}
         # The dummy slave relaxes from the initial guess toward the IPR target
         # (relaxation 0.6): q0 250*0.9=225 -> q_ipr 225 at p_bhp0, so the
         # standalone year-2024 output is 500 + 0.6*(225-500) = 335.
-        self.assertAlmostEqual(by_well_year[("N-P1", "2024")], 335.0, places=3)
-        self.assertAlmostEqual(by_well_year[("N-P2", "2024")], 402.0, places=3)
+        self.assertAlmostEqual(by_well_year[("A-P1", "2024")], 335.0, places=3)
+        self.assertAlmostEqual(by_well_year[("A-P2", "2024")], 402.0, places=3)
 
     def test_standalone_master_dummy_writes_both_constraints_and_choke_matters(self) -> None:
         base = self.temp_dir / "master_base"
@@ -176,7 +183,7 @@ class StandaloneRunTest(unittest.TestCase):
             ).returncode,
             0,
         )
-        for model in ("model_n", "model_hdn"):
+        for model in ("model_a", "model_b"):
             base_rows = read_csv(base / "coupling" / f"network_constraints_{model}.csv")
             choked_rows = read_csv(choked / "coupling" / f"network_constraints_{model}.csv")
             self.assertEqual(len(base_rows), 6)  # 2 wells x 3 years
@@ -201,6 +208,19 @@ class CollectEnsembleTest(unittest.TestCase):
         real = self.case / f"realization-{number}" / "iter-0"
         (real / "coupling").mkdir(parents=True)
         (real / "OK").write_text("", encoding="utf-8")
+        # The driver writes a coupling config copy into every runpath; the
+        # collector reads the slave list from it.
+        (real / "coupling_config.json").write_text(
+            json.dumps(
+                {
+                    "slaves": {
+                        "model_a": {"role": "coupled_slave", "backend": "dummy"},
+                        "model_b": {"role": "coupled_slave", "backend": "dummy"},
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
         for name, value in params.items():
             (real / f"{name}.txt").write_text(f"{name.upper()}  {value}\n", encoding="utf-8")
         with (real / "coupling" / "convergence_history.csv").open("w", newline="", encoding="utf-8") as handle:
@@ -208,15 +228,15 @@ class CollectEnsembleTest(unittest.TestCase):
             writer.writerow(["iteration", "max_fixed_point_residual"])
             writer.writerow(["1", "0.5"])
             writer.writerow(["7", "0.001"])
-        with (real / "coupling" / "slave_rates_model_n.csv").open("w", newline="", encoding="utf-8") as handle:
+        with (real / "coupling" / "slave_rates_model_a.csv").open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             writer.writerow(["well", "year", "q_liq_sm3d", "q_gas_sm3d", "p_bhp_bar"])
-            writer.writerow(["N-P1", "2024", rates["N-P1"], "0", "280"])
-            writer.writerow(["N-P2", "2024", rates["N-P2"], "0", "280"])
-        with (real / "coupling" / "slave_rates_model_hdn.csv").open("w", newline="", encoding="utf-8") as handle:
+            writer.writerow(["A-P1", "2024", rates["A-P1"], "0", "280"])
+            writer.writerow(["A-P2", "2024", rates["A-P2"], "0", "280"])
+        with (real / "coupling" / "slave_rates_model_b.csv").open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             writer.writerow(["well", "year", "q_liq_sm3d", "q_gas_sm3d", "p_bhp_bar"])
-            writer.writerow(["H-P1", "2024", rates["H-P1"], "0", "275"])
+            writer.writerow(["B-P1", "2024", rates["B-P1"], "0", "275"])
 
     def test_nearest_rank_percentiles(self) -> None:
         values = list(range(1, 11))
@@ -227,18 +247,18 @@ class CollectEnsembleTest(unittest.TestCase):
     def test_collect_produces_results_and_summary(self) -> None:
         self.make_realization(
             0,
-            {"q0_mult_model_n": 0.9, "q0_mult_model_hdn": 1.1, "network_choke": 0.95},
-            {"N-P1": 300.0, "N-P2": 350.0, "H-P1": 220.0},
+            {"q0_mult_model_a": 0.9, "q0_mult_model_b": 1.1, "network_choke": 0.95},
+            {"A-P1": 300.0, "A-P2": 350.0, "B-P1": 220.0},
         )
         self.make_realization(
             1,
-            {"q0_mult_model_n": 0.95, "q0_mult_model_hdn": 1.05, "network_choke": 1.1},
-            {"N-P1": 310.0, "N-P2": 360.0, "H-P1": 230.0},
+            {"q0_mult_model_a": 0.95, "q0_mult_model_b": 1.05, "network_choke": 1.1},
+            {"A-P1": 310.0, "A-P2": 360.0, "B-P1": 230.0},
         )
         self.make_realization(
             2,
-            {"q0_mult_model_n": 1.0, "q0_mult_model_hdn": 1.0, "network_choke": 1.0},
-            {"N-P1": 305.0, "N-P2": 355.0, "H-P1": 225.0},
+            {"q0_mult_model_a": 1.0, "q0_mult_model_b": 1.0, "network_choke": 1.0},
+            {"A-P1": 305.0, "A-P2": 355.0, "B-P1": 225.0},
         )
         completed = subprocess.run(
             [sys.executable, str(COLLECT), "--case-dir", str(self.case)],
@@ -250,14 +270,14 @@ class CollectEnsembleTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         results = read_csv(self.case / "ensemble_results.csv")
         self.assertEqual(len(results), 3)
-        self.assertEqual(float(results[0]["q0_mult_model_n"]), 0.9)
+        self.assertEqual(float(results[0]["q0_mult_model_a"]), 0.9)
         self.assertEqual(float(results[0]["network_choke"]), 0.95)
         self.assertEqual(results[0]["iterations"], "7")
-        self.assertEqual(float(results[0]["N-P1_2024_q_liq_sm3d"]), 300.0)
-        self.assertEqual(float(results[0]["H-P1_2024_q_liq_sm3d"]), 220.0)
+        self.assertEqual(float(results[0]["A-P1_2024_q_liq_sm3d"]), 300.0)
+        self.assertEqual(float(results[0]["B-P1_2024_q_liq_sm3d"]), 220.0)
 
         summary = read_csv(self.case / "ensemble_summary.csv")
-        n_p1 = next(row for row in summary if row["well"] == "N-P1" and row["year"] == "2024")
+        n_p1 = next(row for row in summary if row["well"] == "A-P1" and row["year"] == "2024")
         # sorted [300, 305, 310]; nearest-rank n=3: P10=1st, P50=2nd, P90=3rd
         self.assertEqual(float(n_p1["p10_sm3d"]), 300.0)
         self.assertEqual(float(n_p1["p50_sm3d"]), 305.0)
@@ -268,8 +288,8 @@ class CollectEnsembleTest(unittest.TestCase):
     def test_realizations_without_ok_are_skipped(self) -> None:
         self.make_realization(
             0,
-            {"q0_mult_model_n": 1.0, "q0_mult_model_hdn": 1.0, "network_choke": 1.0},
-            {"N-P1": 300.0, "N-P2": 350.0, "H-P1": 220.0},
+            {"q0_mult_model_a": 1.0, "q0_mult_model_b": 1.0, "network_choke": 1.0},
+            {"A-P1": 300.0, "A-P2": 350.0, "B-P1": 220.0},
         )
         # realization-1 has no OK file -> must be skipped
         real = self.case / "realization-1" / "iter-0"
@@ -315,8 +335,8 @@ class PerModelParamsFullRunTest(unittest.TestCase):
             )
             self.assertEqual(completed.returncode, 0, completed.stderr)
             report = (runpath / "COUPLED_REPORT.txt").read_text(encoding="utf-8")
-            self.assertIn("q0_mult model_n    : 0.9", report)
-            self.assertIn("q0_mult model_hdn  : 0.9", report)
+            self.assertIn("q0_mult model_a   : 0.9", report)
+            self.assertIn("q0_mult model_b   : 0.9", report)
             self.assertIn("network_choke      : 1.0", report)
             master_spec = json.loads(
                 (runpath / "master_network" / "simspec.json").read_text(encoding="utf-8")
@@ -332,11 +352,11 @@ class PerModelParamsFullRunTest(unittest.TestCase):
             config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
             runpath = temp_dir / "run"
             runpath.mkdir()
-            (runpath / "q0_mult_model_n.txt").write_text(
-                "Q0_MULT_MODEL_N  0.85\n", encoding="utf-8"
+            (runpath / "q0_mult_model_a.txt").write_text(
+                "Q0_MULT_MODEL_A  0.85\n", encoding="utf-8"
             )
-            (runpath / "q0_mult_model_hdn.txt").write_text(
-                "Q0_MULT_MODEL_HDN  1.15\n", encoding="utf-8"
+            (runpath / "q0_mult_model_b.txt").write_text(
+                "Q0_MULT_MODEL_B  1.15\n", encoding="utf-8"
             )
             (runpath / "network_choke.txt").write_text(
                 "NETWORK_CHOKE  1.1\n", encoding="utf-8"
@@ -358,8 +378,8 @@ class PerModelParamsFullRunTest(unittest.TestCase):
             )
             self.assertEqual(completed.returncode, 0, completed.stderr)
             report = (runpath / "COUPLED_REPORT.txt").read_text(encoding="utf-8")
-            self.assertIn("q0_mult model_n    : 0.85", report)
-            self.assertIn("q0_mult model_hdn  : 1.15", report)
+            self.assertIn("q0_mult model_a   : 0.85", report)
+            self.assertIn("q0_mult model_b   : 1.15", report)
             self.assertIn("network_choke      : 1.1", report)
             master_spec = json.loads(
                 (runpath / "master_network" / "simspec.json").read_text(encoding="utf-8")

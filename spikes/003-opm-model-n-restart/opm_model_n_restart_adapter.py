@@ -9,7 +9,7 @@ exchange schema, plus a restart_report.json containing the statefulness
 checks (cumulative production continuity, WBHP-versus-constraint agreement).
 
 Parameterized per slave model (wells, initial pressure) so the same adapter
-serves model_n and model_hdn. Validated for both in Spike 003.
+serves model_a and model_b. Validated for both in Spike 003.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ import json
 import math
 import shutil
 import subprocess
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -28,15 +29,15 @@ BASE_TEMPLATE = HERE / "MODEL_BASE.DATA.tmpl"
 CONTINUE_TEMPLATE = HERE / "MODEL_CONTINUE.DATA.tmpl"
 EXPECTED_YEARS = (2024, 2025, 2026)
 MODEL_CONFIGS = {
-    "model_n": {
-        "wells": ("N-P1", "N-P2"),
+    "model_a": {
+        "wells": ("A-P1", "A-P2"),
         "initial_pressure_bar": 350.0,
-        "deck_stem": "MODEL_N",
+        "deck_stem": "MODEL_A",
     },
-    "model_hdn": {
-        "wells": ("H-P1", "H-P2"),
+    "model_b": {
+        "wells": ("B-P1", "B-P2"),
         "initial_pressure_bar": 315.0,
-        "deck_stem": "MODEL_HDN",
+        "deck_stem": "MODEL_B",
     },
 }
 ALL_MARKERS = (
@@ -46,6 +47,9 @@ ALL_MARKERS = (
     "__WELL_1_BHP_BAR__",
     "__WELL_2_BHP_BAR__",
     "__INITIAL_PRESSURE_BAR__",
+    "__PERMX_MD__",
+    "__PERMY_MD__",
+    "__PERMZ_MD__",
     "__YEAR_DAYS__",
     "__RESTART_CASE__",
     "__RESTART_STEP__",
@@ -132,6 +136,15 @@ def render_deck(
     replacements: dict[str, str],
 ) -> None:
     rendered = template.read_text(encoding="utf-8")
+    permeability_defaults = {
+        "__PERMX_MD__": "100.000000",
+        "__PERMY_MD__": "100.000000",
+        "__PERMZ_MD__": "10.000000",
+    }
+    replacements = dict(replacements)
+    for marker, default in permeability_defaults.items():
+        if marker in rendered:
+            replacements.setdefault(marker, default)
     # Longer markers first: "__WELL_1_BHP_BAR__" contains "__WELL_1__" as a
     # substring, so BHP markers must be replaced before the bare names.
     for marker in sorted(replacements, key=len, reverse=True):
@@ -217,6 +230,7 @@ def run_year(
     summary_executable: str,
     restart_case: str | None,
     restart_step: int | None = None,
+    productivity_multiplier: float = 1.0,
 ) -> dict[str, Any]:
     year_dir.mkdir(parents=True, exist_ok=True)
     deck_name = f"{deck_stem}_{year}.DATA"
@@ -228,6 +242,9 @@ def run_year(
         "__WELL_1_BHP_BAR__": f"{constraints[wells[0]]:.6f}",
         "__WELL_2_BHP_BAR__": f"{constraints[wells[1]]:.6f}",
         "__YEAR_DAYS__": str(days_in_year(year)),
+        "__PERMX_MD__": f"{100.0 * productivity_multiplier:.6f}",
+        "__PERMY_MD__": f"{100.0 * productivity_multiplier:.6f}",
+        "__PERMZ_MD__": f"{10.0 * productivity_multiplier:.6f}",
     }
     if restart_case is None:
         replacements["__INITIAL_PRESSURE_BAR__"] = f"{initial_pressure_bar:.6f}"
@@ -245,8 +262,6 @@ def run_year(
         flow_executable,
         str(deck_path),
         f"--output-dir={flow_dir}",
-        "--enable-terminal-output=false",
-        "--output-mode=log",
     ]
     flow_completed = run_checked(flow_command, cwd=year_dir)
     (year_dir / "flow.stdout.log").write_text(flow_completed.stdout, encoding="utf-8")
@@ -288,10 +303,16 @@ def run_chain(
     output_dir: Path,
     flow_name: str,
     summary_name: str,
-    model: str = "model_n",
+    model: str = "model_a",
+    productivity_multiplier: float = 1.0,
 ) -> Path:
     if model not in MODEL_CONFIGS:
         raise ValueError(f"unsupported model {model!r}; expected {sorted(MODEL_CONFIGS)}")
+    if not math.isfinite(productivity_multiplier) or productivity_multiplier <= 0.0:
+        raise ValueError(
+            "productivity_multiplier must be a finite positive number: "
+            f"{productivity_multiplier}"
+        )
     config = MODEL_CONFIGS[model]
     wells = config["wells"]
     initial_pressure_bar = config["initial_pressure_bar"]
@@ -321,12 +342,13 @@ def run_chain(
                 summary_executable,
                 restart_case,
                 restart_step=index if index > 0 else None,
+                productivity_multiplier=productivity_multiplier,
             )
         )
 
     checks: dict[str, Any] = {"fopt_strictly_increasing": True}
     annual_increments: list[dict[str, float]] = []
-    for previous, current in zip(year_results, year_results[1:]):
+    for previous, current in pairwise(year_results):
         increment = current["field"]["fopt_sm3"] - previous["field"]["fopt_sm3"]
         annual_increments.append(
             {
@@ -407,6 +429,7 @@ def run_chain(
         "simulator": version,
         "extractor": Path(summary_executable).name,
         "model": model,
+        "productivity_multiplier": productivity_multiplier,
         "wells": list(wells),
         "years": list(EXPECTED_YEARS),
         "constraints": constraints,
@@ -445,11 +468,17 @@ def main() -> int:
     parser.add_argument(
         "--model",
         choices=sorted(MODEL_CONFIGS),
-        default="model_n",
+        default="model_a",
         help="slave model whose exchange contract this chain fills",
     )
     parser.add_argument("--flow", default="flow", help="Flow executable name or path")
     parser.add_argument("--summary", default="summary", help="OPM summary executable name or path")
+    parser.add_argument(
+        "--productivity-multiplier",
+        type=float,
+        default=1.0,
+        help="realization-specific permeability/productivity multiplier",
+    )
     args = parser.parse_args()
     rates_path = run_chain(
         args.constraints.resolve(),
@@ -457,6 +486,7 @@ def main() -> int:
         args.flow,
         args.summary,
         model=args.model,
+        productivity_multiplier=args.productivity_multiplier,
     )
     print(f"OPM {args.model.upper()} RESTART CHAIN COMPLETE: {rates_path}")
     return 0

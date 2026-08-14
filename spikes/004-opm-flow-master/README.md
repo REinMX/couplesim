@@ -6,7 +6,7 @@ master: four real slave wells load the shared trunk, GSATPROD satellites
 register in group totals **and load the trunk VFP on 2026.04** (Spike 002
 flips PARTIAL → VALIDATED), per-iteration rate inputs render into WCONPROD,
 and per-well BHP constraints are extracted back to the slaves. The all-real
-realization (Flow master + Flow model_n + Flow model_hdn) converges in 13
+realization (Flow master + Flow model_a + Flow model_b) converges in 13
 iterations.
 
 ## Question
@@ -25,9 +25,9 @@ working master backend.
 
 `opm_flow_master_adapter.py` per coupling iteration:
 
-1. reads `slave_rates_model_n.csv` + `slave_rates_model_hdn.csv` (initial
+1. reads `slave_rates_model_a.csv` + `slave_rates_model_b.csv` (initial
    guesses on iteration 1) and parses the prescribed GSATPROD profile;
-2. renders `MASTER_FLOW.DATA` — 4 real wells (N-P1/N-P2/H-P1/H-P2 under
+2. renders `MASTER_FLOW.DATA` — 4 real wells (A-P1/A-P2/B-P1/B-P2 under
    PLAT), GSATPROD group SAT on MANIFOLD, trunk MANIFOLD→FIELD with VFP,
    per-year WCONPROD rates + GSATPROD records, Jan-1→Jan-1 leap-aware
    TSTEP;
@@ -86,8 +86,8 @@ H wells, trunk) from compact parameters.
 
 ```bash
 python3 spikes/004-opm-flow-master/opm_flow_master_adapter.py \
-  --rates-model-n output/demo/realization-0/coupling/slave_rates_model_n.csv \
-  --rates-model-hdn output/demo/realization-0/coupling/slave_rates_model_hdn.csv \
+  --rates model_a output/demo/realization-0/coupling/slave_rates_model_a.csv \
+  --rates model_b output/demo/realization-0/coupling/slave_rates_model_b.csv \
   --profile input/master_network/profiles/gsatprod_external.inc \
   --output-dir output/flow-master-spike
 ```
@@ -103,18 +103,18 @@ or empty.
 ├── vfp_tables_master.inc
 ├── flow-run/                 # SMSPEC, UNSMRY, PRT, ...
 ├── summary.txt               # raw summary -r output
-├── network_constraints_model_n.csv
-├── network_constraints_model_hdn.csv
+├── network_constraints_model_a.csv
+├── network_constraints_model_b.csv
 └── master_report.json        # requested/delivered rates, constraints, checks
 ```
 
 ## Verified evidence (Flow 2026.04)
 
 Standalone probes (2024 row) at three rate levels — manifold responds
-monotonically, all BHPs stay below the slave caps (350 model_n / 315
-model_hdn):
+monotonically, all BHPs stay below the slave caps (350 model_a / 315
+model_b):
 
-| Case | Simulated total sm³/d | Manifold bar | N-P1 BHP bar | H-P1 BHP bar | Delivered |
+| Case | Simulated total sm³/d | Manifold bar | A-P1 BHP bar | B-P1 BHP bar | Delivered |
 |---|---:|---:|---:|---:|---|
 | low | 474 | 30.6 | 289.2 | 272.4 | yes |
 | high | 4740 | 47.3 | 305.9 | 289.1 | yes |
@@ -124,7 +124,7 @@ The satellite load now contributes to the manifold on 2026.04: at fixed
 low well rates, a 20× prescribed profile (220 → 4400 sm³/d) moves the
 manifold 30.6 → 47.0 bar (Spike 002 flips PARTIAL → VALIDATED).
 
-Full all-real realization (Flow master + Flow model_n + Flow model_hdn,
+Full all-real realization (Flow master + Flow model_a + Flow model_b,
 relaxation 0.4, max_iterations 20, Q0_MULT=1.0): **converged in 13 of 20
 iterations** (tolerance 0.005), residual 455% → 0.31%, zero master cutbacks.
 
@@ -133,7 +133,7 @@ iterations** (tolerance 0.005), residual 455% → 0.31%, zero master cutbacks.
 | Residual | 455% | 77% | 33% | 22% | 12% | 8.1% | 5.3% | 3.4% | 2.1% | 1.3% | 0.81% | 0.50% | 0.31% |
 
 Final slave rates (sm³/d) decline with depletion; final master constraints
-(2024) honour the network: N-P1 BHP 306.9, N-P2 303.6, H-P1 290.2, H-P2
+(2024) honour the network: A-P1 BHP 306.9, A-P2 303.6, B-P1 290.2, B-P2
 287.0 bar — all below the 350/315 bar slave caps.
 
 ## Scope and limitations

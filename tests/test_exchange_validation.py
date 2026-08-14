@@ -7,8 +7,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
+LEGACY_CONFIG = ROOT / "configs" / "coupling.legacy-gsatprod.json"
 
 
 def load_module(name: str, path: Path):
@@ -48,15 +48,15 @@ class ExchangeValidationTest(unittest.TestCase):
         for invalid_field in numeric_fields:
             with self.subTest(field=invalid_field), tempfile.TemporaryDirectory() as temp_dir:
                 runpath = Path(temp_dir)
-                model_dir = runpath / "model_n"
+                model_dir = runpath / "model_a"
                 model_dir.mkdir()
                 coupling_dir = runpath / "coupling"
                 (coupling_dir / "exchange").mkdir(parents=True)
 
                 spec = json.loads(
-                    (ROOT / "input" / "model_n" / "simspec.json").read_text(encoding="utf-8")
+                    (ROOT / "input" / "model_a" / "simspec.json").read_text(encoding="utf-8")
                 )
-                coupling = json.loads((ROOT / "coupling.json").read_text(encoding="utf-8"))
+                coupling = json.loads((LEGACY_CONFIG).read_text(encoding="utf-8"))
                 rows: list[list[object]] = []
                 for well in spec["wells"]:
                     for year in (2024, 2025, 2026):
@@ -64,7 +64,7 @@ class ExchangeValidationTest(unittest.TestCase):
                         if not rows:
                             values[invalid_field] = "NaN"
                         rows.append([well["name"], year, *(values[field] for field in numeric_fields)])
-                with (coupling_dir / "network_constraints_model_n.csv").open(
+                with (coupling_dir / "network_constraints_model_a.csv").open(
                     "w", newline="", encoding="utf-8"
                 ) as handle:
                     writer = csv.writer(handle)
@@ -77,23 +77,23 @@ class ExchangeValidationTest(unittest.TestCase):
     def test_initial_rate_generation_rejects_gas_rate_overflow(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             runpath = Path(temp_dir)
-            model_dir = runpath / "model_n"
+            model_dir = runpath / "model_a"
             model_dir.mkdir()
             (runpath / "coupling").mkdir()
 
             spec = json.loads(
-                (ROOT / "input" / "model_n" / "simspec.json").read_text(encoding="utf-8")
+                (ROOT / "input" / "model_a" / "simspec.json").read_text(encoding="utf-8")
             )
             for well in spec["wells"]:
                 well["gor_sm3_sm3"] = 1.0e308
             (model_dir / "simspec.json").write_text(json.dumps(spec), encoding="utf-8")
 
-            coupling = json.loads((ROOT / "coupling.json").read_text(encoding="utf-8"))
+            coupling = json.loads((LEGACY_CONFIG).read_text(encoding="utf-8"))
             for well in spec["wells"]:
                 coupling["initial_slave_rates_sm3d"][well["name"]] = 1.0e308
 
             with self.assertRaisesRegex(ValueError, "initial gas rate"):
-                DRIVER.initial_rate_rows(runpath, coupling, "model_n", [2024])
+                DRIVER.initial_rate_rows(runpath, coupling, "model_a", [2024])
 
 
 if __name__ == "__main__":

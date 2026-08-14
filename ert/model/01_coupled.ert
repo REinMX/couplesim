@@ -6,8 +6,8 @@
 --     master_network  dummy reservoir + shared subsea network      (master)
 --                     consumes prescribed external GSATPROD profiles PLUS
 --                     simulated production from both slaves
---     model_n         dynamic reservoir/well simulation             (slave)
---     model_hdn       dynamic reservoir/well simulation             (slave)
+--     model_a         dynamic reservoir/well simulation             (slave)
+--     model_b       dynamic reservoir/well simulation             (slave)
 --
 -- Exchange loop: slave rates -> master network -> pressure constraints ->
 -- both slaves -> new rates -> convergence. The prescribed external profile
@@ -15,7 +15,7 @@
 -- The driver lives in ert/bin/scripts/run_coupled.py; the licence-free model
 -- adapter is bin/eclipse_dummy.py. Optional real OPM Flow backends for the
 -- master and each slave are selectable via coupling.json ("backend": "flow")
--- or the driver's --backend-model-n flag (model_n only); see README.md
+-- or the driver's repeatable --backend <model> <backend> flag; see README.md
 -- "Hybrid mode". See coupling.json and README.md for the work required to
 -- replace the rest with real Eclipse or OPM Flow adapters.
 --

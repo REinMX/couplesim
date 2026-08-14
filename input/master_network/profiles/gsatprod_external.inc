@@ -1,6 +1,6 @@
 GSATPROD
 -- ILLUSTRATIVE prescribed profiles for external subsea wells that are not
--- simulated by model_n or model_hdn. These rows are inputs TO master_network.
+-- simulated by model_a or model_b. These rows are inputs TO master_network.
 -- The dummy parser uses: WELL YEAR Q_LIQ_SM3D Q_GAS_SM3D P_WH P_BHP GSAT.
 -- Replace this illustrative record layout with the exact Eclipse keyword
 -- syntax used by the real master deck; the workflow treats the file as an

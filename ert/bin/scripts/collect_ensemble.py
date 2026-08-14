@@ -49,7 +49,7 @@ def parse_param(runpath: Path, name: str) -> float | None:
         return None
     for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
-        if not line or line.startswith("#") or line.startswith("--"):
+        if not line or line.startswith(("#", "--")):
             continue
         return float(line.split()[-1])
     return None
@@ -86,6 +86,16 @@ def read_slave_rates(runpath: Path, model: str) -> list[dict[str, Any]]:
     ]
 
 
+def load_slaves(runpath: Path) -> list[str]:
+    """Slave models of a realization, from the coupling config copy the
+    driver writes into each runpath."""
+    path = runpath / "coupling_config.json"
+    if not path.is_file():
+        return []
+    coupling = json.loads(path.read_text(encoding="utf-8"))
+    return list(coupling.get("slaves", {}))
+
+
 def collect_realizations(case_dir: Path, iter_filter: int | None) -> list[dict[str, Any]]:
     realizations: list[dict[str, Any]] = []
     for real_dir in sorted(case_dir.glob("realization-*"), key=lambda p: int(p.name.split("-")[1])):
@@ -102,17 +112,17 @@ def collect_realizations(case_dir: Path, iter_filter: int | None) -> list[dict[s
             entry: dict[str, Any] = {
                 "realization": int(real_dir.name.split("-")[1]),
                 "iter": iter_no,
-                "q0_mult_model_n": parse_param(iter_dir, "q0_mult_model_n"),
-                "q0_mult_model_hdn": parse_param(iter_dir, "q0_mult_model_hdn"),
-                "network_choke": parse_param(iter_dir, "network_choke"),
+                "network_choke": parse_param(iter_dir, "network_choke") or 1.0,
                 "converged": True,
             }
-            if entry["q0_mult_model_n"] is None:
-                entry["q0_mult_model_n"] = parse_param(iter_dir, "q0_mult")
+            for model in load_slaves(iter_dir):
+                entry[f"q0_mult_{model}"] = parse_param(iter_dir, f"q0_mult_{model}")
+                if entry[f"q0_mult_{model}"] is None:
+                    entry[f"q0_mult_{model}"] = parse_param(iter_dir, "q0_mult")
             iterations_used, final_residual = read_convergence(iter_dir)
             entry["iterations"] = iterations_used
             entry["final_residual"] = final_residual
-            for model in ("model_n", "model_hdn"):
+            for model in load_slaves(iter_dir):
                 for rate in read_slave_rates(iter_dir, model):
                     key = f"{rate['well']}_{rate['year']}"
                     entry[f"{key}_q_liq_sm3d"] = rate["q_liq_sm3d"]

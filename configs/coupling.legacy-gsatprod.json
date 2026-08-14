@@ -1,16 +1,21 @@
 {
-  "title": "Fully two-way Flow coupling: realization-matched Model A and Model B through one shared network master",
+  "title": "Legacy one-way profile source plus two coupled reservoir slaves",
   "schedule": {
     "start": "2024-01-01",
     "years": 3,
     "steps_per_year": 1
   },
   "coupling": {
-    "max_iterations": 20,
+    "max_iterations": 12,
     "tolerance": 0.005,
-    "relaxation": 0.4
+    "relaxation": 0.6
   },
-  "prescribed_network_profiles": {},
+  "prescribed_network_profiles": {
+    "external_satellite": {
+      "keyword": "GSATPROD",
+      "path": "input/master_network/profiles/gsatprod_external.inc"
+    }
+  },
   "initial_slave_rates_sm3d": {
     "A-P1": 500.0,
     "A-P2": 600.0,
@@ -19,8 +24,7 @@
   },
   "master": {
     "model": "master_network",
-    "deck": "MASTER.DATA",
-    "backend": "flow"
+    "deck": "MASTER.DATA"
   },
   "slaves": {
     "model_a": {

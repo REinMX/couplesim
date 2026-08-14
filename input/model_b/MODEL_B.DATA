@@ -1,19 +1,20 @@
 -- ============================================================================
--- MODEL_N.DATA -- ILLUSTRATIVE deck for the coupled-simulation example.
+-- MODEL_B.DATA -- ILLUSTRATIVE deck for the coupled-simulation example.
 --
--- Role: coupled slave. Subsea wells N-P1/N-P2 report simulated rates to
--- master_network. The master combines them with prescribed external profiles
--- and model_hdn results, solves the shared network, and returns pressure
--- constraints through the driver-level exchange files.
+-- Role: coupled slave (like model_a). Subsea wells B-P1/B-P2 report
+-- simulated rates to master_network. The master combines those rates with
+-- prescribed external profiles and model_a results, solves the shared
+-- network, and returns pressure constraints through driver-level exchange
+-- files.
 --
 -- !!! This deck is NOT executed by the example (no Eclipse licence needed).
 --     The dummy simulator (bin/eclipse_dummy.py) reads simspec.json next
---     to this file instead. Replace this file with your real model_n deck
---     from your FMU setup when going to production.
+--     to this file instead. Replace this file with your real model_b
+--     deck from your FMU setup when going to production.
 -- ============================================================================
 RUNSPEC
 TITLE
-  COUPLED EXAMPLE - MODEL_N (COUPLED SLAVE, SUBSEA WELLS)
+  COUPLED EXAMPLE - MODEL_B (COUPLED SLAVE, SUBSEA WELLS)
 DIMENS
   5 5 3 /
 OIL
@@ -73,25 +74,24 @@ SCHEDULE
 RPTRST
   BASIC=2 /
 WELSPECS
-  'N-P1' 'G1' 3 3 2010.0 'OIL' /
-  'N-P2' 'G1' 4 3 2010.0 'OIL' /
+  'B-P1' 'G1' 2 3 2010.0 'OIL' /
+  'B-P2' 'G1' 3 4 2010.0 'OIL' /
 /
 COMPDAT
-  'N-P1' 3 3 1 3 'OPEN' 1* 1* 0.3 /
-  'N-P2' 4 3 1 3 'OPEN' 1* 1* 0.3 /
+  'B-P1' 2 3 1 3 'OPEN' 1* 1* 0.3 /
+  'B-P2' 3 4 1 3 'OPEN' 1* 1* 0.3 /
 /
 -- ---------------------------------------------------------------------------
 -- Coupling interface (illustrative): the licence-free driver exchanges
--- coupling/slave_rates_model_n.csv -> master_network and
--- coupling/network_constraints_model_n.csv -> this slave. Those CSV files
+-- coupling/slave_rates_model_b.csv -> master_network and
+-- coupling/network_constraints_model_b.csv -> this slave. Those CSV files
 -- are NOT Eclipse keywords. In a real coupled run, map the same rate/pressure
 -- contract to the coupling controls supported by your Eclipse/FMU setup.
--- Do not place the prescribed external GSATPROD profiles in this slave deck;
--- they belong to the master/network model.
+-- Prescribed external GSATPROD profiles belong to the master/network deck.
 -- ---------------------------------------------------------------------------
 WCONPROD
-  'N-P1' 'OPEN' 'ORAT' 500.0 4* 2500.0 /
-  'N-P2' 'OPEN' 'ORAT' 500.0 4* 2500.0 /
+  'B-P1' 'OPEN' 'ORAT' 300.0 4* 2500.0 /
+  'B-P2' 'OPEN' 'ORAT' 300.0 4* 2500.0 /
 /
 TSTEP
   365.0 /

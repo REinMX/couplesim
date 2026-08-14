@@ -1,20 +1,17 @@
 -- ============================================================================
--- Stage 2: coupled multi-model ENSEMBLE (master dummy network + two slaves).
+-- Stage 2: coupled multi-model ENSEMBLE (Flow network master + two reservoirs).
 --
 -- One realization = THREE models run "at the same time" through a single
 -- forward-model step (RUN_COUPLED):
---     master_network  dummy reservoir + shared subsea network      (master)
---                     consumes prescribed external GSATPROD profiles PLUS
---                     simulated production from both slaves
---     model_n         dynamic reservoir/well simulation             (slave)
---     model_hdn       dynamic reservoir/well simulation             (slave)
+--     master_network  shared subsea NETWORK solved by Flow          (master)
+--                     consumes only current rates from both slaves
+--     model_a         dynamic reservoir/well simulation             (slave)
+--     model_b         dynamic reservoir/well simulation             (slave)
 --
--- Uncertain parameters are INDEPENDENT per model (each realization draws its
--- own values from every group):
---     Q0_MULT_MODEL_N    productivity multiplier for model_n
---     Q0_MULT_MODEL_HDN  productivity multiplier for model_hdn
---     NETWORK_CHOKE      friction-pressure-drop scale of the shared network
---                        solved by the master
+-- Uncertain parameters are INDEPENDENT per reservoir model (each realization
+-- draws one productivity/permeability proxy for each slave):
+--     Q0_MULT_MODEL_A    productivity multiplier for model_a
+--     Q0_MULT_MODEL_B    productivity multiplier for model_b
 --
 -- Exchange loop: slave rates -> master network -> pressure constraints ->
 -- both slaves -> new rates -> convergence (fixed-point relaxation).
@@ -23,17 +20,18 @@
 -- licence-free dummy path is one config edit away, and the same decks are
 -- Eclipse-standard syntax for when the licence arrives. The per-model
 -- quality-check ensembles (one model alone) are master_network.ert,
--- model_n.ert and model_hdn.ert. After a run, aggregate all realizations
+-- model_a.ert and model_b.ert. After a run, aggregate all realizations
 -- with:
---     ert/bin/scripts/collect_ensemble.py --case-dir output/02_coupled
+--     ert/bin/scripts/collect_ensemble.py --case-dir output/02_coupled_stepwise_verified
 --
--- Your FMU setups use 100 realizations: set NUM_REALIZATIONS 100 when you
--- plug in the real decks. For quick local checks keep it small (2) or use:
+-- The ensemble declares 100 realizations. Run sparse/ranged subsets with ERT,
+-- for example --realizations 0-2, while preserving one complete coupling loop
+-- inside each selected realization:
 --     ert test_run 02_ensemble_coupled.ert
 --     COUPLING_CONFIG=../../configs/coupling.fast.json ert test_run 02_ensemble_coupled.ert
 -- ============================================================================
 
-NUM_REALIZATIONS      10
+NUM_REALIZATIONS      100
 RANDOM_SEED           20260805
 
 QUEUE_SYSTEM          LOCAL
@@ -41,7 +39,7 @@ QUEUE_SYSTEM          LOCAL
 -- simulators each slot also holds one flow/eclipse process per model.
 QUEUE_OPTION LOCAL MAX_RUNNING 2
 
-DEFINE  <CASE_DIR>      02_coupled
+DEFINE  <CASE_DIR>      02_coupled_stepwise_verified
 
 RUNPATH       ../../output/<CASE_DIR>/realization-<IENS>/iter-<ITER>
 ENSPATH       ../../output/<CASE_DIR>/storage
@@ -55,12 +53,11 @@ RUNPATH_FILE  ../../output/<CASE_DIR>/runpath_file
 ECLBASE       eclipse/model/MASTER
 
 -- --- Uncertain parameters --------------------------------------------------
--- One group per model: every realization draws an independent sample for
--- each slave and for the master network. GEN_KW parameter names must be
--- unique across the config, so each group has its own priors file.
-GEN_KW  Q0_MULT_MODEL_N    ../../input/templates/q0_mult_model_n.tmpl    q0_mult_model_n.txt    ../../input/distributions/q0_mult_model_n_priors.txt
-GEN_KW  Q0_MULT_MODEL_HDN  ../../input/templates/q0_mult_model_hdn.tmpl  q0_mult_model_hdn.txt  ../../input/distributions/q0_mult_model_hdn_priors.txt
-GEN_KW  NETWORK_CHOKE      ../../input/templates/network_choke.tmpl      network_choke.txt      ../../input/distributions/network_priors.txt
+-- One group per reservoir: every realization draws an independent sample for
+-- each slave. The network/VFP realization is fixed at its nominal case.
+GEN_KW  Q0_MULT_MODEL_A    ../../input/templates/q0_mult_model_a.tmpl    q0_mult_model_a.txt    ../../input/distributions/q0_mult_model_a_priors.txt
+GEN_KW  Q0_MULT_MODEL_B    ../../input/templates/q0_mult_model_b.tmpl    q0_mult_model_b.txt    ../../input/distributions/q0_mult_model_b_priors.txt
+
 
 -- --- The forward model -----------------------------------------------------
 -- One step per realization: the coupled driver stages the three models
@@ -73,4 +70,4 @@ FORWARD_MODEL RUN_COUPLED
 -- With real simulators each model writes its own summary below the runpath;
 -- list the per-model keys you want ERT to register once the ECLBASE
 -- convention is aligned per model, e.g.:
--- SUMMARY  WOPR:N-P1  WBHP:N-P1  FPR
+-- SUMMARY  WOPR:A-P1  WBHP:A-P1  FPR

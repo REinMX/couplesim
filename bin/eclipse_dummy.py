@@ -4,7 +4,7 @@
 The exchange directions are intentionally explicit:
 
 * prescribed GSATPROD rows are immutable inputs to ``master_network``;
-* ``model_n`` and ``model_hdn`` write simulated rates to the network;
+* ``model_a`` and ``model_b`` write simulated rates to the network;
 * the network combines all three source categories and returns calculated
   pressure constraints to each simulated slave.
 
@@ -205,7 +205,7 @@ def run_master(
     profile_sources: dict[str, dict[str, Any]] = {}
     prescribed_by_year = {year: 0.0 for year in years}
     prescribed_wells: set[str] = set()
-    for profile_name, profile_cfg in coupling["prescribed_network_profiles"].items():
+    for profile_name, profile_cfg in coupling.get("prescribed_network_profiles", {}).items():
         profile_path = staged_profile_path(model_dir, spec["model"], profile_cfg["path"])
         profile_rows = parse_gsatprod_inc(profile_path)
         validate_prescribed_profile_rows(profile_rows, year_set, profile_name)

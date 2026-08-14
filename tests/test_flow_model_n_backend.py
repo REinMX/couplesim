@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -10,8 +9,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
+LEGACY_CONFIG = ROOT / "configs" / "coupling.legacy-gsatprod.json"
 DRIVER = ROOT / "ert" / "bin" / "scripts" / "run_coupled.py"
 FLOW_AVAILABLE = shutil.which("flow") is not None and shutil.which("summary") is not None
 
@@ -42,7 +41,7 @@ def run_driver(
 
 class FlowBackendValidationTest(unittest.TestCase):
     def write_config(self, path: Path, slaves: dict) -> None:
-        config = json.loads((ROOT / "coupling.json").read_text(encoding="utf-8"))
+        config = json.loads((LEGACY_CONFIG).read_text(encoding="utf-8"))
         config["slaves"] = slaves
         path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
 
@@ -50,20 +49,20 @@ class FlowBackendValidationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)
             config = temp / "coupling.json"
-            slaves = json.loads((ROOT / "coupling.json").read_text(encoding="utf-8"))["slaves"]
-            slaves["model_n"]["backend"] = "eclipse"
+            slaves = json.loads((LEGACY_CONFIG).read_text(encoding="utf-8"))["slaves"]
+            slaves["model_a"]["backend"] = "eclips"
             self.write_config(config, slaves)
             completed = run_driver("--config", str(config), runpath=temp / "run")
             self.assertNotEqual(completed.returncode, 0)
             self.assertIn("unsupported backend", completed.stderr)
             self.assertFalse((temp / "run" / "master_network").exists())
 
-    def test_flow_backend_on_model_hdn_is_accepted(self) -> None:
+    def test_flow_backend_on_model_b_is_accepted(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)
             config = temp / "coupling.json"
-            slaves = json.loads((ROOT / "coupling.json").read_text(encoding="utf-8"))["slaves"]
-            slaves["model_hdn"]["backend"] = "flow"
+            slaves = json.loads((LEGACY_CONFIG).read_text(encoding="utf-8"))["slaves"]
+            slaves["model_b"]["backend"] = "flow"
             self.write_config(config, slaves)
             stripped = {"PATH": ""}
             completed = run_driver(
@@ -82,12 +81,12 @@ class FlowBackendValidationTest(unittest.TestCase):
             temp = Path(temp_dir)
             stripped = {"PATH": ""}
             completed = run_driver(
-                "--backend-model-n", "flow",
+                "--backend", "model_a", "flow",
                 runpath=temp / "run",
                 env=stripped,
             )
             self.assertNotEqual(completed.returncode, 0)
-            self.assertIn("flow backend requires", completed.stderr)
+            self.assertIn("flow master backend requires", completed.stderr)
             self.assertFalse((temp / "run" / "master_network").exists())
 
     def test_cli_backend_override_lands_in_runpath_config_copy(self) -> None:
@@ -95,29 +94,29 @@ class FlowBackendValidationTest(unittest.TestCase):
             self.skipTest("requires installed OPM Flow and summary CLI")
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)
-            completed = run_driver("--backend-model-n", "flow", runpath=temp / "run")
+            completed = run_driver("--backend", "model_a", "flow", runpath=temp / "run")
             self.assertEqual(completed.returncode, 0, completed.stderr)
             copied = json.loads(
                 (temp / "run" / "coupling_config.json").read_text(encoding="utf-8")
             )
-            self.assertEqual(copied["slaves"]["model_n"]["backend"], "flow")
+            self.assertEqual(copied["slaves"]["model_a"]["backend"], "flow")
 
 
 @unittest.skipUnless(FLOW_AVAILABLE, "requires installed OPM Flow and summary CLI")
 class FlowBackendHybridIntegrationTest(unittest.TestCase):
-    """One full hybrid realization: real Flow model_n + dummy model_hdn +
+    """One full hybrid realization: real Flow model_a + dummy model_b +
     dummy master_network with prescribed GSATPROD sources."""
 
     @classmethod
     def setUpClass(cls) -> None:
         cls.temp_dir = tempfile.TemporaryDirectory()
         cls.temp = Path(cls.temp_dir.name)
-        # Pin model_hdn to dummy explicitly: the repo default is now hybrid
-        # (both slaves on flow), while this class tests the model_n-only
+        # Pin model_b to dummy explicitly: the repo default is now hybrid
+        # (both slaves on flow), while this class tests the model_a-only
         # hybrid topology.
-        config = json.loads((ROOT / "coupling.json").read_text(encoding="utf-8"))
-        config["slaves"]["model_n"]["backend"] = "flow"
-        config["slaves"]["model_hdn"]["backend"] = "dummy"
+        config = json.loads((LEGACY_CONFIG).read_text(encoding="utf-8"))
+        config["slaves"]["model_a"]["backend"] = "flow"
+        config["slaves"]["model_b"]["backend"] = "dummy"
         cls.config_path = cls.temp / "coupling-hybrid.json"
         cls.config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
         cls.runpath = cls.temp / "hybrid-run"
@@ -138,22 +137,22 @@ class FlowBackendHybridIntegrationTest(unittest.TestCase):
     def test_report_names_the_backends(self) -> None:
         self.assertEqual(self.completed.returncode, 0, self.completed.stderr)
         report = (self.runpath / "COUPLED_REPORT.txt").read_text(encoding="utf-8")
-        self.assertIn("slave backends     : model_n=flow, model_hdn=dummy", report)
+        self.assertIn("slave backends     : model_a=flow, model_b=dummy", report)
         self.assertIn("prescribed profiles : external_satellite (GSATPROD)", report)
 
     def test_flow_rates_are_real_flow_outputs(self) -> None:
         self.assertEqual(self.completed.returncode, 0, self.completed.stderr)
-        rows = read_csv(self.runpath / "coupling" / "slave_rates_model_n.csv")
+        rows = read_csv(self.runpath / "coupling" / "slave_rates_model_a.csv")
         self.assertEqual(len(rows), 6)
         self.assertEqual({int(row["year"]) for row in rows}, {2024, 2025, 2026})
-        self.assertEqual({row["well"] for row in rows}, {"N-P1", "N-P2"})
+        self.assertEqual({row["well"] for row in rows}, {"A-P1", "A-P2"})
         for row in rows:
             self.assertTrue(row["origin"].startswith("opm_flow_restart"))
             self.assertGreater(float(row["q_liq_sm3d"]), 0.0)
             self.assertGreater(float(row["q_ipr_sm3d"]), 0.0)
             self.assertLess(float(row["p_bhp_bar"]), 350.0)
         flow_iters = sorted(
-            (self.runpath / "coupling" / "flow_model_n").glob("iteration-*")
+            (self.runpath / "coupling" / "flow_model_a").glob("iteration-*")
         )
         self.assertGreaterEqual(len(flow_iters), 2)
         self.assertTrue(
@@ -165,7 +164,7 @@ class FlowBackendHybridIntegrationTest(unittest.TestCase):
                 self.runpath
                 / "coupling"
                 / "exchange"
-                / "slave_result_model_n_iteration_001.json"
+                / "slave_result_model_a_iteration_001.json"
             ).read_text(encoding="utf-8")
         )
         self.assertEqual(result["backend"], "opm_flow_restart")
@@ -178,7 +177,7 @@ class FlowBackendHybridIntegrationTest(unittest.TestCase):
             (self.runpath / "coupling" / "exchange").glob("network_request_iteration_*.json")
         )
         request = json.loads(requests[-1].read_text(encoding="utf-8"))
-        self.assertEqual(set(request["sources"]["simulated_slaves"]), {"model_n", "model_hdn"})
+        self.assertEqual(set(request["sources"]["simulated_slaves"]), {"model_a", "model_b"})
         self.assertEqual(
             set(request["sources"]["prescribed_profiles"]), {"external_satellite"}
         )
@@ -191,23 +190,23 @@ class FlowBackendHybridIntegrationTest(unittest.TestCase):
 
     def test_dummy_slave_unchanged_by_flow_backend(self) -> None:
         self.assertEqual(self.completed.returncode, 0, self.completed.stderr)
-        rows = read_csv(self.runpath / "coupling" / "slave_rates_model_hdn.csv")
+        rows = read_csv(self.runpath / "coupling" / "slave_rates_model_b.csv")
         self.assertTrue(rows)
         self.assertTrue(all(row["origin"] == "simulation_output" for row in rows))
 
 
 @unittest.skipUnless(FLOW_AVAILABLE, "requires installed OPM Flow and summary CLI")
 class FlowBackendBothFlowIntegrationTest(unittest.TestCase):
-    """Both slaves on real Flow: model_n and model_hdn restart chains in the
+    """Both slaves on real Flow: model_a and model_b restart chains in the
     same coupled realization (the repo's intended hybrid topology)."""
 
     @classmethod
     def setUpClass(cls) -> None:
         cls.temp_dir = tempfile.TemporaryDirectory()
         cls.temp = Path(cls.temp_dir.name)
-        config = json.loads((ROOT / "coupling.json").read_text(encoding="utf-8"))
-        config["slaves"]["model_n"]["backend"] = "flow"
-        config["slaves"]["model_hdn"]["backend"] = "flow"
+        config = json.loads((LEGACY_CONFIG).read_text(encoding="utf-8"))
+        config["slaves"]["model_a"]["backend"] = "flow"
+        config["slaves"]["model_b"]["backend"] = "flow"
         cls.config_path = cls.temp / "coupling-both.json"
         cls.config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
         cls.runpath = cls.temp / "both-run"
@@ -223,11 +222,11 @@ class FlowBackendBothFlowIntegrationTest(unittest.TestCase):
         self.assertGreaterEqual(len(history), 2)
         self.assertLessEqual(float(history[-1]["max_fixed_point_residual"]), 0.005)
         report = (self.runpath / "COUPLED_REPORT.txt").read_text(encoding="utf-8")
-        self.assertIn("slave backends     : model_n=flow, model_hdn=flow", report)
+        self.assertIn("slave backends     : model_a=flow, model_b=flow", report)
 
     def test_both_slaves_emit_real_flow_rates(self) -> None:
         self.assertEqual(self.completed.returncode, 0, self.completed.stderr)
-        for model, wells in (("model_n", {"N-P1", "N-P2"}), ("model_hdn", {"H-P1", "H-P2"})):
+        for model, wells in (("model_a", {"A-P1", "A-P2"}), ("model_b", {"B-P1", "B-P2"})):
             rows = read_csv(self.runpath / "coupling" / f"slave_rates_{model}.csv")
             self.assertEqual(len(rows), 6)
             self.assertEqual({row["well"] for row in rows}, wells)
@@ -258,7 +257,7 @@ class FlowBackendBothFlowIntegrationTest(unittest.TestCase):
             (self.runpath / "coupling" / "exchange").glob("network_request_iteration_*.json")
         )
         request = json.loads(requests[-1].read_text(encoding="utf-8"))
-        self.assertEqual(set(request["sources"]["simulated_slaves"]), {"model_n", "model_hdn"})
+        self.assertEqual(set(request["sources"]["simulated_slaves"]), {"model_a", "model_b"})
         self.assertEqual(
             set(request["sources"]["prescribed_profiles"]), {"external_satellite"}
         )

@@ -1,10 +1,10 @@
--- Real OPM Flow 2025.10 spike deck for one stateful slave year
--- (continuation). Identical RUNSPEC/GRID/PROPS/SCHEDULE to the base deck;
--- the SOLUTION section restarts from the previous year's unified restart
--- file instead of EQUIL.
+-- Real OPM Flow 2025.10 spike deck for one stateful slave year (fresh start).
+-- Fresh-initialized 5-cell oil-water model with one annual report step.
+-- The continuation deck for later years replaces the SOLUTION section with
+-- RESTART and re-renders this same RUNSPEC/GRID/PROPS/SCHEDULE skeleton.
 RUNSPEC
 TITLE
-  OPM SLAVE RESTART SPIKE CONTINUATION YEAR
+  OPM SLAVE RESTART SPIKE BASE YEAR
 DIMENS
   5 1 1 /
 OIL
@@ -34,11 +34,11 @@ TOPS
 PORO
   5*0.25 /
 PERMX
-  5*__PERMX_MD__ /
+  5*100 /
 PERMY
-  5*__PERMY_MD__ /
+  5*100 /
 PERMZ
-  5*__PERMZ_MD__ /
+  5*10 /
 
 PROPS
 PVDO
@@ -63,8 +63,8 @@ SWOF
   1.00 0.470 0.000 0.0 /
 
 SOLUTION
-RESTART
-  '__RESTART_CASE__' __RESTART_STEP__ /
+EQUIL
+  2010 __INITIAL_PRESSURE_BAR__ 3000.0 0.0 1500.0 0.0 1* 1* 0 /
 RPTRST
   BASIC=2 /
 

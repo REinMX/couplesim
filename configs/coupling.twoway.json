@@ -1,5 +1,5 @@
 {
-  "title": "Fully two-way Flow coupling: realization-matched Model A and Model B through one shared network master",
+  "title": "Fully two-way coupling: both slaves are the only network sources (no prescribed external profiles)",
   "schedule": {
     "start": "2024-01-01",
     "years": 3,

@@ -12,7 +12,7 @@ Given Flow is installed and the project master is currently a dummy, when we aut
 
 ## Why this matters
 
-The coupled example currently uses `bin/eclipse_dummy.py` and an illustrative `network.inc` sketch. Spike 001 proved a real Flow slave for `model_n`. The next risk is the **master**: if Flow cannot honour a standard/extended network model plus GSATPROD, we either wait for an Eclipse licence or keep the dummy forever.
+The coupled example currently uses `bin/eclipse_dummy.py` and an illustrative `network.inc` sketch. Spike 001 proved a real Flow slave for `model_n` (the repo's slave is `model_a` today). The next risk is the **master**: if Flow cannot honour a standard/extended network model plus GSATPROD, we either wait for an Eclipse licence or keep the dummy forever.
 
 ## Approach
 
@@ -99,13 +99,23 @@ The well is cut back so field total hits the group limit. Satellite rates partic
 - Coupling keywords (`SLAVES`/`GRUPMAST`/`GRUPSLAV`/`RCMASTS`) are recognized by the OPM parser; `--slave` flag exists.
 - All of the above uses Eclipse-compatible keyword syntax, so decks prepared now remain runnable under an Eclipse licence later.
 
-### Recommendation for the real build
+### Recommendation and current repository use
 
-Keep the current file-exchange coupling architecture. Promote pieces as follows:
+This spike establishes Flow's keyword/runtime behavior for legacy prescribed
+sources. The active repository topology has since changed:
 
-1. **Simulated slaves** → real Flow adapters (Spike 001 path) with restart state (Spike 003) — done.
-2. **Master network hydraulics for simulated + prescribed rates** → the Flow NETWORK master (Spike 004) now carries the full hydraulic load including the GSATPROD satellites on Flow ≥ 2026.04. The `eclipse_dummy.py` analytic solver remains the licence-free fallback and the repo default.
-3. When the Eclipse licence arrives, the same GRUPNET/NETWORK/GSATPROD decks are the production path; the external solver becomes a fallback.
+1. **Simulated slaves** use real restart-based Flow adapters (Spike 003).
+2. **Primary network hydraulics** use the no-profile Flow master from Spike 004;
+   current Model A and Model B rates load the network directly.
+3. `GSATPROD` support remains useful for genuine external sources and the
+   explicit `configs/coupling.legacy-gsatprod.json` regression fixture, but it
+   is not the repository default and does not represent Model B in the primary
+   two-way workflow.
+4. The Python analytic solver remains a fast dummy-test fallback, not the
+   active all-real default.
+5. If an Eclipse licence is used later, keep the same bidirectional exchange
+   contract or move to native reservoir coupling; do not silently reintroduce
+   Model B as a one-way prescribed profile.
 
 ## Files
 

@@ -1,16 +1,10 @@
 #!/usr/bin/env python3
 """Run the real OPM Flow network master for one coupling iteration.
 
-Reads the slaves' latest rates (slave_rates_model_n.csv / model_hdn.csv) and
-the prescribed GSATPROD profile, renders the 4-well NETWORK master deck
-(Spike 004), runs Flow, and writes the network constraints back in the
-existing exchange schema (network_constraints_<slave>.csv) plus a
-master_report.json.
-
-Flow 2025.10 scope (Spike 002): the four real wells load the trunk VFP and
-see back-pressure; GSATPROD satellites register in group totals but do NOT
-load the trunk VFP, so the prescribed hydraulic load is not represented by
-the master's pressures (quantified in the report's checks).
+Reads the slaves' latest rates (slave_rates_model_a.csv / model_b.csv), renders
+the 4-well NETWORK master deck, runs Flow, and writes pressure constraints back
+to both slaves. A prescribed GSATPROD profile remains optional for legacy
+external-source studies; the primary two-way mode has no prescribed profile.
 """
 
 from __future__ import annotations
@@ -22,28 +16,28 @@ import json
 import math
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
 HERE = Path(__file__).resolve().parent
 TEMPLATE = HERE / "MASTER_FLOW.DATA.tmpl"
+TWOWAY_TEMPLATE = HERE / "MASTER_FLOW_TWOWAY.DATA.tmpl"
 VFP_INC = HERE / "vfp_tables_master.inc"
 ROOT = HERE.parents[1]
 DUMMY = ROOT / "bin" / "eclipse_dummy.py"
 
-MASTER_WELLS = ("N-P1", "N-P2", "H-P1", "H-P2")
-SLAVE_MODELS = ("model_n", "model_hdn")
+MASTER_WELLS = ("A-P1", "A-P2", "B-P1", "B-P2")
+SLAVE_MODELS = ("model_a", "model_b")
 YEARS = (2024, 2025, 2026)
-SUMMARY_VECTORS = (
+TWOWAY_SUMMARY_VECTORS = (
     *tuple(f"WOPR:{well}" for well in MASTER_WELLS),
     *tuple(f"WWPR:{well}" for well in MASTER_WELLS),
     *tuple(f"WBHP:{well}" for well in MASTER_WELLS),
     *tuple(f"WTHP:{well}" for well in MASTER_WELLS),
-    "GOPR:SAT",
     "GPR:PLAT",
     "GPR:MANIFOLD",
 )
+PROFILE_SUMMARY_VECTORS = (*TWOWAY_SUMMARY_VECTORS, "GOPR:SAT")
 GRAVITY = 9.81  # m/s2
 
 
@@ -56,6 +50,7 @@ def load_master_spec(path: Path) -> dict[str, Any]:
     if not math.isfinite(density) or density <= 0.0:
         raise ValueError(f"master simspec has invalid fluid density: {density}")
     tvd: dict[str, float] = {}
+    well_model: dict[str, str] = {}
     for well in spec.get("wells", []):
         name = well.get("name")
         depth = well.get("tvd_m")
@@ -68,10 +63,23 @@ def load_master_spec(path: Path) -> dict[str, Any]:
         if not math.isfinite(depth_value) or depth_value <= 0.0:
             raise ValueError(f"master simspec has invalid well TVD: {well}")
         tvd[str(name)] = depth_value
+        slave = well.get("slave")
+        if slave is None:
+            raise ValueError(f"master simspec well is missing its slave model: {well}")
+        well_model[str(name)] = str(slave)
     missing = [well for well in MASTER_WELLS if well not in tvd]
     if missing:
         raise ValueError(f"master simspec is missing TVD for wells: {missing}")
-    return {"density_kg_m3": density, "tvd_m": tvd}
+    extra = sorted(set(tvd) - set(MASTER_WELLS))
+    if extra:
+        raise ValueError(f"master simspec lists wells outside the master deck: {extra}")
+    assigned = set(well_model.values())
+    if assigned != set(SLAVE_MODELS):
+        raise ValueError(
+            f"master simspec slave map does not match the configured slaves: "
+            f"spec={sorted(assigned)}, expected={sorted(SLAVE_MODELS)}"
+        )
+    return {"density_kg_m3": density, "tvd_m": tvd, "well_model": well_model}
 
 
 def hydrostatic_bar(density_kg_m3: float, tvd_m: float) -> float:
@@ -150,18 +158,24 @@ def profile_totals(rows: list[dict[str, Any]], years: tuple[int, ...]) -> dict[i
 def render_deck(
     destination: Path,
     rates: dict[str, dict[tuple[str, int], float]],
-    prescribed: dict[int, dict[str, float]],
+    prescribed: dict[int, dict[str, float]] | None,
+    well_model: dict[str, str],
 ) -> None:
-    rendered = TEMPLATE.read_text(encoding="utf-8")
+    template = TEMPLATE if prescribed is not None else TWOWAY_TEMPLATE
+    rendered = template.read_text(encoding="utf-8")
     replacements: dict[str, str] = {}
     for index, year in enumerate(YEARS):
         year_key = f"Y{index + 1}"
-        replacements[f"__{year_key}_SAT_OIL_SM3D__"] = f"{prescribed[year]['oil']:.6f}"
-        replacements[f"__{year_key}_SAT_GAS_SM3D__"] = f"{prescribed[year]['gas']:.6f}"
+        if prescribed is not None:
+            replacements[f"__{year_key}_SAT_OIL_SM3D__"] = (
+                f"{prescribed[year]['oil']:.6f}"
+            )
+            replacements[f"__{year_key}_SAT_GAS_SM3D__"] = (
+                f"{prescribed[year]['gas']:.6f}"
+            )
         for well in MASTER_WELLS:
-            model = "model_n" if well.startswith("N-") else "model_hdn"
             key = f"__{year_key}_{well.replace('-', '_')}_ORAT__"
-            replacements[key] = f"{rates[model][(well, year)]:.6f}"
+            replacements[key] = f"{rates[well_model[well]][(well, year)]:.6f}"
     for marker, value in replacements.items():
         if rendered.count(marker) != 1:
             raise ValueError(f"template must contain exactly one {marker}")
@@ -171,14 +185,14 @@ def render_deck(
     destination.write_text(rendered, encoding="utf-8")
 
 
-def parse_summary(text: str) -> list[dict[str, float]]:
+def parse_summary(text: str, vectors: tuple[str, ...]) -> list[dict[str, float]]:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     if len(lines) < 2:
         raise ValueError(
             f"expected at least one report-step row from summary, found {len(lines) - 1}"
         )
     header = lines[0].split()
-    if tuple(header) != SUMMARY_VECTORS:
+    if tuple(header) != vectors:
         raise ValueError(f"unexpected summary vectors: {header}")
     rows: list[dict[str, float]] = []
     for line in lines[1:]:
@@ -195,12 +209,14 @@ def parse_summary(text: str) -> list[dict[str, float]]:
     return rows
 
 
-def extract_summary(summary_executable: str, smspec: Path) -> tuple[list[dict[str, float]], str]:
+def extract_summary(
+    summary_executable: str, smspec: Path, vectors: tuple[str, ...]
+) -> tuple[list[dict[str, float]], str]:
     completed = run_checked(
-        [summary_executable, "-r", str(smspec), *SUMMARY_VECTORS],
+        [summary_executable, "-r", str(smspec), *vectors],
         cwd=smspec.parent,
     )
-    return parse_summary(completed.stdout), completed.stdout
+    return parse_summary(completed.stdout, vectors), completed.stdout
 
 
 def write_constraints(
@@ -258,35 +274,45 @@ def write_constraints(
 
 
 def execute(
-    rates_model_n: Path,
-    rates_model_hdn: Path,
-    profile: Path,
-    output_dir: Path,
-    flow_name: str,
-    summary_name: str,
+    rates: dict[str, Path],
+    profile: Path | None = None,
+    output_dir: Path | None = None,
+    flow_name: str = "flow",
+    summary_name: str = "summary",
     simspec: Path | None = None,
 ) -> dict[str, Any]:
     dummy = load_dummy_parser()
     master_spec = load_master_spec(simspec or (ROOT / "input" / "master_network" / "simspec.json"))
-    rates: dict[str, dict[tuple[str, int], float]] = {
-        "model_n": read_slave_rates(rates_model_n),
-        "model_hdn": read_slave_rates(rates_model_hdn),
-    }
+    well_model = master_spec["well_model"]
+    parsed_rates: dict[str, dict[tuple[str, int], float]] = {}
+    for model in SLAVE_MODELS:
+        if model not in rates:
+            raise ValueError(f"no rates file supplied for slave {model}")
+        parsed_rates[model] = read_slave_rates(rates[model])
     for model in SLAVE_MODELS:
         missing = [
             (well, year)
             for well in MASTER_WELLS
-            if well.startswith("N-") == (model == "model_n")
+            if well_model[well] == model
             for year in YEARS
-            if (well, year) not in rates[model]
+            if (well, year) not in parsed_rates[model]
         ]
         if missing:
             raise ValueError(f"slave rates for {model} are missing coverage: {missing[:5]}...")
-    profile_rows = dummy.parse_gsatprod_inc(profile)
-    prescribed = profile_totals(profile_rows, YEARS)
+    if profile is None:
+        prescribed = {year: {"oil": 0.0, "gas": 0.0} for year in YEARS}
+        rendered_profile = None
+        summary_vectors = TWOWAY_SUMMARY_VECTORS
+    else:
+        profile_rows = dummy.parse_gsatprod_inc(profile)
+        prescribed = profile_totals(profile_rows, YEARS)
+        rendered_profile = prescribed
+        summary_vectors = PROFILE_SUMMARY_VECTORS
 
     flow_executable = require_executable(flow_name)
     summary_executable = require_executable(summary_name)
+    if output_dir is None:
+        raise ValueError("output_dir is required")
     if output_dir.exists() and any(output_dir.iterdir()):
         raise ValueError(f"output directory must be absent or empty: {output_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -294,15 +320,13 @@ def execute(
     version = run_checked([flow_executable, "--version"], cwd=output_dir).stdout.strip()
     shutil.copy2(VFP_INC, output_dir / VFP_INC.name)
     deck_path = output_dir / "MASTER_FLOW.DATA"
-    render_deck(deck_path, rates, prescribed)
+    render_deck(deck_path, parsed_rates, rendered_profile, well_model)
     flow_dir = output_dir / "flow-run"
     flow_completed = run_checked(
         [
             flow_executable,
             str(deck_path),
             f"--output-dir={flow_dir}",
-            "--enable-terminal-output=false",
-            "--output-mode=log",
         ],
         cwd=output_dir,
     )
@@ -312,7 +336,7 @@ def execute(
     smspec = flow_dir / "MASTER_FLOW.SMSPEC"
     if not smspec.is_file():
         raise FileNotFoundError(f"Flow did not create the master summary: {smspec}")
-    summary_rows, summary_text = extract_summary(summary_executable, smspec)
+    summary_rows, summary_text = extract_summary(summary_executable, smspec, summary_vectors)
     (output_dir / "summary.txt").write_text(summary_text, encoding="utf-8")
 
     row_by_well_year: dict[tuple[str, int], dict[str, float]] = {}
@@ -323,23 +347,23 @@ def execute(
             delivered[(well, year)] = summary_row[f"WOPR:{well}"] + summary_row[f"WWPR:{well}"]
     simulated_by_year = {
         year: sum(
-            rates[model][(well, year)]
+            parsed_rates[model][(well, year)]
             for model in SLAVE_MODELS
             for well in MASTER_WELLS
-            if well.startswith("N-") == (model == "model_n")
+            if well_model[well] == model
         )
         for year in YEARS
     }
 
     constraints: dict[str, list[dict[str, Any]]] = {}
     for model in SLAVE_MODELS:
-        wells = tuple(well for well in MASTER_WELLS if well.startswith("N-") == (model == "model_n"))
+        wells = tuple(well for well in MASTER_WELLS if well_model[well] == model)
         constraints[model] = write_constraints(
             output_dir / f"network_constraints_{model}.csv",
             model,
             wells,
             YEARS,
-            rates[model],
+            parsed_rates[model],
             prescribed,
             simulated_by_year,
             row_by_well_year,
@@ -350,21 +374,30 @@ def execute(
         {
             "well": well,
             "year": year,
-            "requested_sm3d": rates[model][(well, year)],
+            "requested_sm3d": parsed_rates[model][(well, year)],
             "delivered_sm3d": delivered[(well, year)],
         }
         for model in SLAVE_MODELS
         for well in MASTER_WELLS
-        if well.startswith("N-") == (model == "model_n")
+        if well_model[well] == model
         for year in YEARS
-        if delivered[(well, year)] < rates[model][(well, year)] - 1.0e-3
+        if delivered[(well, year)] < parsed_rates[model][(well, year)] - 1.0e-3
     ]
     checks = {
         "wells_deliver_requested_rates": not cutbacks,
         "cutbacks": cutbacks,
-        "satellite_registers_in_group_totals": all(
-            math.isclose(summary_rows[index]["GOPR:SAT"], prescribed[year]["oil"], abs_tol=1.0e-3)
-            for index, year in enumerate(YEARS)
+        "external_profile_used": profile is not None,
+        "satellite_registers_in_group_totals": (
+            all(
+                math.isclose(
+                    summary_rows[index]["GOPR:SAT"],
+                    prescribed[year]["oil"],
+                    abs_tol=1.0e-3,
+                )
+                for index, year in enumerate(YEARS)
+            )
+            if profile is not None
+            else None
         ),
         "manifold_pressure_by_year": {
             str(year): round(summary_rows[index]["GPR:MANIFOLD"], 6)
@@ -376,14 +409,16 @@ def execute(
         "simulator": version,
         "extractor": Path(summary_executable).name,
         "years": list(YEARS),
-        "prescribed_profile": {
-            str(year): prescribed[year] for year in YEARS
-        },
+        "prescribed_profile": (
+            {str(year): prescribed[year] for year in YEARS}
+            if profile is not None
+            else {}
+        ),
         "requested_rates": {
             model: {
-                f"{well}/{year}": rates[model][(well, year)]
+                f"{well}/{year}": parsed_rates[model][(well, year)]
                 for well in MASTER_WELLS
-                if well.startswith("N-") == (model == "model_n")
+                if well_model[well] == model
                 for year in YEARS
             }
             for model in SLAVE_MODELS
@@ -398,8 +433,10 @@ def execute(
         "artifacts": {
             "deck": str(deck_path),
             "smspec": str(smspec),
-            "constraints_n": str(output_dir / "network_constraints_model_n.csv"),
-            "constraints_hdn": str(output_dir / "network_constraints_model_hdn.csv"),
+            **{
+                f"constraints_{model}": str(output_dir / f"network_constraints_{model}.csv")
+                for model in SLAVE_MODELS
+            },
         },
     }
     (output_dir / "master_report.json").write_text(
@@ -411,9 +448,20 @@ def execute(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--rates-model-n", type=Path, required=True)
-    parser.add_argument("--rates-model-hdn", type=Path, required=True)
-    parser.add_argument("--profile", type=Path, required=True)
+    parser.add_argument(
+        "--rates",
+        nargs=2,
+        action="append",
+        metavar=("MODEL", "PATH"),
+        required=True,
+        help="slave rates CSV for one coupled slave (repeatable)",
+    )
+    parser.add_argument(
+        "--profile",
+        type=Path,
+        default=None,
+        help="optional prescribed GSATPROD include; omit for fully two-way mode",
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--flow", default="flow", help="Flow executable name or path")
     parser.add_argument("--summary", default="summary", help="OPM summary executable name or path")
@@ -424,10 +472,10 @@ def main() -> int:
         help="master simspec with well TVDs and fluid density (default: input/master_network)",
     )
     args = parser.parse_args()
+    rates = {model: Path(path).resolve() for model, path in args.rates}
     report = execute(
-        args.rates_model_n.resolve(),
-        args.rates_model_hdn.resolve(),
-        args.profile.resolve(),
+        rates,
+        args.profile.resolve() if args.profile is not None else None,
         args.output_dir.resolve(),
         args.flow,
         args.summary,

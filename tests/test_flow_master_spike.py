@@ -9,15 +9,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
+LEGACY_CONFIG = ROOT / "configs" / "coupling.legacy-gsatprod.json"
 MASTER_ADAPTER = ROOT / "spikes" / "004-opm-flow-master" / "opm_flow_master_adapter.py"
 DRIVER = ROOT / "ert" / "bin" / "scripts" / "run_coupled.py"
 PROFILE = ROOT / "input" / "master_network" / "profiles" / "gsatprod_external.inc"
 FLOW_AVAILABLE = shutil.which("flow") is not None and shutil.which("summary") is not None
 
-N_CAP = 350.0
-HDN_CAP = 315.0
+A_CAP = 350.0
+B_CAP = 315.0
 
 
 def read_csv(path: Path) -> list[dict[str, str]]:
@@ -51,9 +51,11 @@ def run_master(
         [
             sys.executable,
             str(MASTER_ADAPTER),
-            "--rates-model-n",
+            "--rates",
+            "model_a",
             str(rates_n),
-            "--rates-model-hdn",
+            "--rates",
+            "model_b",
             str(rates_hdn),
             "--profile",
             str(profile),
@@ -84,7 +86,7 @@ def run_driver(
 
 class FlowMasterValidationTest(unittest.TestCase):
     def make_config(self, path: Path, master_backend: str) -> Path:
-        config = json.loads((ROOT / "coupling.json").read_text(encoding="utf-8"))
+        config = json.loads((LEGACY_CONFIG).read_text(encoding="utf-8"))
         config["master"]["backend"] = master_backend
         path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
         return path
@@ -114,8 +116,8 @@ class FlowMasterValidationTest(unittest.TestCase):
             temp = Path(temp_dir)
             rates_n = temp / "n.csv"
             rates_hdn = temp / "hdn.csv"
-            write_rates(rates_n, 500.0, ("N-P1", "N-P2"))
-            write_rates(rates_hdn, 400.0, ("H-P1", "H-P2"))
+            write_rates(rates_n, 500.0, ("A-P1", "A-P2"))
+            write_rates(rates_hdn, 400.0, ("B-P1", "B-P2"))
             completed = run_master(rates_n, rates_hdn, temp / "run")
             # Default simspec exists, so this run should succeed; a missing
             # simspec path is exercised via execute() directly below.
@@ -127,8 +129,7 @@ class FlowMasterValidationTest(unittest.TestCase):
             spec.loader.exec_module(module)  # type: ignore[union-attr]
             with self.assertRaises(FileNotFoundError):
                 module.execute(
-                    rates_n,
-                    rates_hdn,
+                    {"model_a": rates_n, "model_b": rates_hdn},
                     PROFILE,
                     temp / "run2",
                     "flow",
@@ -144,15 +145,15 @@ class FlowMasterAdapterIntegrationTest(unittest.TestCase):
             temp = Path(temp_dir)
             rates_n = temp / "n.csv"
             rates_hdn = temp / "hdn.csv"
-            write_rates(rates_n, 500.0, ("N-P1", "N-P2"))
-            write_rates(rates_hdn, 400.0, ("H-P1", "H-P2"))
+            write_rates(rates_n, 500.0, ("A-P1", "A-P2"))
+            write_rates(rates_hdn, 400.0, ("B-P1", "B-P2"))
             completed = run_master(rates_n, rates_hdn, temp / "run")
             self.assertEqual(completed.returncode, 0, completed.stderr)
 
             report = json.loads((temp / "run" / "master_report.json").read_text(encoding="utf-8"))
             self.assertTrue(report["simulator"].startswith("flow "))
             self.assertEqual(report["checks"]["satellite_registers_in_group_totals"], True)
-            for model, cap in (("model_n", N_CAP), ("model_hdn", HDN_CAP)):
+            for model, cap in (("model_a", A_CAP), ("model_b", B_CAP)):
                 rows = read_csv(temp / "run" / f"network_constraints_{model}.csv")
                 self.assertEqual(len(rows), 6)
                 for row in rows:
@@ -172,8 +173,8 @@ class FlowMasterAdapterIntegrationTest(unittest.TestCase):
             for label, base in (("low", 150.0), ("high", 1500.0)):
                 rates_n = temp / f"{label}-n.csv"
                 rates_hdn = temp / f"{label}-hdn.csv"
-                write_rates(rates_n, base, ("N-P1", "N-P2"))
-                write_rates(rates_hdn, base * 0.8, ("H-P1", "H-P2"))
+                write_rates(rates_n, base, ("A-P1", "A-P2"))
+                write_rates(rates_hdn, base * 0.8, ("B-P1", "B-P2"))
                 completed = run_master(rates_n, rates_hdn, temp / label)
                 self.assertEqual(completed.returncode, 0, completed.stderr)
                 report = json.loads((temp / label / "master_report.json").read_text(encoding="utf-8"))
@@ -183,11 +184,11 @@ class FlowMasterAdapterIntegrationTest(unittest.TestCase):
 
 @unittest.skipUnless(FLOW_AVAILABLE, "requires installed OPM Flow and summary CLI")
 class FlowMasterDriverIntegrationTest(unittest.TestCase):
-    def make_config(self, path: Path, master: str, model_n: str, model_hdn: str) -> Path:
-        config = json.loads((ROOT / "coupling.json").read_text(encoding="utf-8"))
+    def make_config(self, path: Path, master: str, model_a: str, model_b: str) -> Path:
+        config = json.loads((LEGACY_CONFIG).read_text(encoding="utf-8"))
         config["master"]["backend"] = master
-        config["slaves"]["model_n"]["backend"] = model_n
-        config["slaves"]["model_hdn"]["backend"] = model_hdn
+        config["slaves"]["model_a"]["backend"] = model_a
+        config["slaves"]["model_b"]["backend"] = model_b
         path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
         return path
 
@@ -200,7 +201,7 @@ class FlowMasterDriverIntegrationTest(unittest.TestCase):
             history = read_csv(temp / "run" / "coupling" / "convergence_history.csv")
             self.assertLessEqual(float(history[-1]["max_fixed_point_residual"]), 0.005)
             report = (temp / "run" / "COUPLED_REPORT.txt").read_text(encoding="utf-8")
-            self.assertIn("slave backends     : model_n=dummy, model_hdn=dummy", report)
+            self.assertIn("slave backends     : model_a=dummy, model_b=dummy", report)
             flow_master = temp / "run" / "coupling" / "flow_master"
             self.assertGreaterEqual(len(list(flow_master.glob("iteration-*"))), 2)
 
@@ -219,19 +220,19 @@ class FlowMasterDriverIntegrationTest(unittest.TestCase):
             history = read_csv(temp / "run" / "coupling" / "convergence_history.csv")
             self.assertLessEqual(float(history[-1]["max_fixed_point_residual"]), 0.005)
             report = (temp / "run" / "COUPLED_REPORT.txt").read_text(encoding="utf-8")
-            self.assertIn("slave backends     : model_n=flow, model_hdn=flow", report)
-            for model in ("model_n", "model_hdn"):
+            self.assertIn("slave backends     : model_a=flow, model_b=flow", report)
+            for model in ("model_a", "model_b"):
                 rows = read_csv(temp / "run" / "coupling" / f"slave_rates_{model}.csv")
                 self.assertTrue(rows)
                 self.assertTrue(all(row["origin"].startswith("opm_flow_restart") for row in rows))
             # The master's constraints must have stayed under the slave caps.
-            for model, cap in (("model_n", N_CAP), ("model_hdn", HDN_CAP)):
+            for model, cap in (("model_a", A_CAP), ("model_b", B_CAP)):
                 rows = read_csv(temp / "run" / "coupling" / f"network_constraints_{model}.csv")
                 self.assertTrue(all(float(row["p_bhp_bar"]) < cap for row in rows))
             # The final master iteration should deliver every requested rate.
-            last_master = sorted(
+            last_master = max(
                 (temp / "run" / "coupling" / "flow_master").glob("iteration-*")
-            )[-1]
+            )
             report = json.loads((last_master / "master_report.json").read_text(encoding="utf-8"))
             self.assertEqual(report["checks"]["cutbacks"], [])
 

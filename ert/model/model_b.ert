@@ -1,17 +1,17 @@
 -- ============================================================================
--- Standalone ensemble for model_hdn.
+-- Standalone ensemble for model_b.
 --
--- One realization = ONE model: model_hdn runs once against static
+-- One realization = ONE model: model_b runs once against static
 -- reference-IPR constraints (p_bhp = p_bhp0, no backpressure) built from its
 -- simspec and the initial rates in coupling.json. This is the per-model
--- quality check (like your FMU setup for model_hdn alone); the coupled loop
+-- quality check (like your FMU setup for model_b alone); the coupled loop
 -- that iterates master + both slaves belongs to 02_ensemble_coupled.ert.
 --
 -- Simulator backend comes from coupling.json (default: real OPM Flow;
 -- "dummy" keeps the licence-free path). Quick smoke without Flow:
---     COUPLING_CONFIG=../../configs/coupling.fast.json ert test_run model_hdn.ert
+--     COUPLING_CONFIG=../../configs/coupling.fast.json ert test_run model_b.ert
 --
--- Uncertain parameter: Q0_MULT_MODEL_HDN (productivity multiplier, the role
+-- Uncertain parameter: Q0_MULT_MODEL_B (productivity multiplier, the role
 -- permeability/rock parameters play in your 100-realization FMU setups).
 -- ============================================================================
 
@@ -21,19 +21,19 @@ RANDOM_SEED           20260805
 QUEUE_SYSTEM          LOCAL
 QUEUE_OPTION LOCAL MAX_RUNNING 2
 
-DEFINE  <CASE_DIR>      model_hdn
+DEFINE  <CASE_DIR>      model_b
 
 RUNPATH       ../../output/<CASE_DIR>/realization-<IENS>/iter-<ITER>
 ENSPATH       ../../output/<CASE_DIR>/storage
 RUNPATH_FILE  ../../output/<CASE_DIR>/runpath_file
 
 -- FMU convention: ECLBASE is a path *inside* the runpath.
-ECLBASE       eclipse/model/MODEL_HDN
+ECLBASE       eclipse/model/MODEL_B
 
 -- --- Uncertain parameters --------------------------------------------------
-GEN_KW  Q0_MULT_MODEL_HDN  ../../input/templates/q0_mult_model_hdn.tmpl  q0_mult_model_hdn.txt  ../../input/distributions/q0_mult_model_hdn_priors.txt
+GEN_KW  Q0_MULT_MODEL_B  ../../input/templates/q0_mult_model_b.tmpl  q0_mult_model_b.txt  ../../input/distributions/q0_mult_model_b_priors.txt
 
 -- --- The forward model -----------------------------------------------------
-INSTALL_JOB  RUN_MODEL_HDN  ../bin/jobs/RUN_MODEL_HDN
+INSTALL_JOB  RUN_MODEL_B  ../bin/jobs/RUN_MODEL_B
 
-FORWARD_MODEL RUN_MODEL_HDN
+FORWARD_MODEL RUN_MODEL_B

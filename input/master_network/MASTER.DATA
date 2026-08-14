@@ -79,15 +79,15 @@ COMPDAT
 /
 -- ---------------------------------------------------------------------------
 -- Prescribed production profiles are INPUTS TO this master/network model.
--- They represent external subsea wells that are not simulated in model_n or
--- model_hdn. The row layout is illustrative: replace it with the exact
+-- They represent external subsea wells that are not simulated in model_a or
+-- model_b. The row layout is illustrative: replace it with the exact
 -- GSATPROD/GSATPTAB syntax used by your Eclipse version and current deck.
 -- ---------------------------------------------------------------------------
 INCLUDE
   'profiles/gsatprod_external.inc' /
 -- ---------------------------------------------------------------------------
 -- The subsea network receives those prescribed profiles PLUS dynamic rates
--- from model_n and model_hdn. This NETWORK block is only a structural sketch;
+-- from model_a and model_b. This NETWORK block is only a structural sketch;
 -- replace it with the nodes, branches, well connections and controls from
 -- your real master model.
 -- ---------------------------------------------------------------------------

@@ -17,24 +17,24 @@
     }
   },
   "initial_slave_rates_sm3d": {
-    "N-P1": 500.0,
-    "N-P2": 600.0,
-    "H-P1": 400.0,
-    "H-P2": 450.0
+    "A-P1": 500.0,
+    "A-P2": 600.0,
+    "B-P1": 400.0,
+    "B-P2": 450.0
   },
   "master": {
     "model": "master_network",
     "deck": "MASTER.DATA"
   },
   "slaves": {
-    "model_n": {
+    "model_a": {
       "role": "coupled_slave",
-      "deck": "MODEL_N.DATA",
+      "deck": "MODEL_A.DATA",
       "backend": "dummy"
     },
-    "model_hdn": {
+    "model_b": {
       "role": "coupled_slave",
-      "deck": "MODEL_HDN.DATA",
+      "deck": "MODEL_B.DATA",
       "backend": "dummy"
     }
   }

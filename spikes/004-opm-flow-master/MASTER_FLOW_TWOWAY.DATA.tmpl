@@ -1,15 +1,10 @@
--- Spike 004: real OPM Flow network master for the coupled example.
--- Four REAL slave wells (A-P1/A-P2/B-P1/B-P2) produce against a shared
--- subsea network: wells -> PLAT -> MANIFOLD (branch, no VFP) and the trunk
--- MANIFOLD -> FIELD carries the combined simulated flow through VFP table 2.
--- The prescribed external satellites enter as the GSATPROD group SAT on the
--- same manifold (group totals / GCONPROD only on Flow 2025.10, see Spike 002).
--- OIL/WATER/GAS + DISGAS required: Flow asserts rates.size()==3 for branch
--- VFPs. Per-year WCONPROD renders the slave rates; per-year GSATPROD renders
--- the prescribed profile. Year runs Jan-1 to Jan-1 (leap-aware TSTEP).
+-- Two-way Flow NETWORK master: no prescribed external sources.
+-- Model A and Model B are both real restartable reservoir slaves.
+-- Their latest rates are rendered as four network slot wells; the resulting
+-- network pressures return to both slaves for the next fixed-point iteration.
 RUNSPEC
 TITLE
-  OPM FLOW NETWORK MASTER
+  OPM FLOW TWO-WAY NETWORK MASTER
 DIMENS
   5 1 1 /
 OIL
@@ -24,9 +19,9 @@ TABDIMS
 EQLDIMS
   1 /
 WELLDIMS
-  4 1 4 4 /
+  4 1 2 4 /
 NETWORK
-  5 4 /
+  3 2 /
 VFPPDIMS
   5 5 2 2 3 2 /
 UNIFIN
@@ -96,10 +91,8 @@ WBHP
   'A-P1' 'A-P2' 'B-P1' 'B-P2' /
 WTHP
   'A-P1' 'A-P2' 'B-P1' 'B-P2' /
-GOPR
-  'SAT' /
 GPR
-  'PLAT' 'SAT' 'MANIFOLD' /
+  'PLAT' 'MANIFOLD' /
 RUNSUM
 
 SCHEDULE
@@ -107,7 +100,6 @@ INCLUDE
   'vfp_tables_master.inc' /
 GRUPTREE
   'PLAT' 'MANIFOLD' /
-  'SAT' 'MANIFOLD' /
   'MANIFOLD' 'FIELD' /
 /
 WELSPECS
@@ -122,19 +114,14 @@ COMPDAT
   'B-P1' 1 1 1 1 'OPEN' 1* 1* 0.2 1* 0.0 1* 'Z' /
   'B-P2' 3 1 1 1 'OPEN' 1* 1* 0.2 1* 0.0 1* 'Z' /
 /
-GSATPROD
-  'SAT' __Y1_SAT_OIL_SM3D__ 0.0 __Y1_SAT_GAS_SM3D__ /
-/
 BRANPROP
   'PLAT' 'MANIFOLD' 9999 /
-  'SAT' 'MANIFOLD' 9999 /
   'MANIFOLD' 'FIELD' 3 /
 /
 NODEPROP
   'FIELD' 20.0 /
   'MANIFOLD' /
   'PLAT' /
-  'SAT' /
 /
 WCONPROD
   'A-P1' 'OPEN' 'ORAT' __Y1_A_P1_ORAT__ 3* 1* 50.0 10.0 1 /
@@ -144,9 +131,6 @@ WCONPROD
 /
 TSTEP
   366 /
-GSATPROD
-  'SAT' __Y2_SAT_OIL_SM3D__ 0.0 __Y2_SAT_GAS_SM3D__ /
-/
 WCONPROD
   'A-P1' 'OPEN' 'ORAT' __Y2_A_P1_ORAT__ 3* 1* 50.0 10.0 1 /
   'A-P2' 'OPEN' 'ORAT' __Y2_A_P2_ORAT__ 3* 1* 50.0 10.0 1 /
@@ -155,9 +139,6 @@ WCONPROD
 /
 TSTEP
   365 /
-GSATPROD
-  'SAT' __Y3_SAT_OIL_SM3D__ 0.0 __Y3_SAT_GAS_SM3D__ /
-/
 WCONPROD
   'A-P1' 'OPEN' 'ORAT' __Y3_A_P1_ORAT__ 3* 1* 50.0 10.0 1 /
   'A-P2' 'OPEN' 'ORAT' __Y3_A_P2_ORAT__ 3* 1* 50.0 10.0 1 /

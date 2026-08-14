@@ -8,8 +8,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
+LEGACY_CONFIG = ROOT / "configs" / "coupling.legacy-gsatprod.json"
 DRIVER = ROOT / "ert" / "bin" / "scripts" / "run_coupled.py"
 
 
@@ -25,7 +25,7 @@ def base_config() -> dict:
     tests exercise the licence-free dummy workflow, so they opt out of the
     flow backends explicitly.
     """
-    config = json.loads((ROOT / "coupling.json").read_text(encoding="utf-8"))
+    config = json.loads((LEGACY_CONFIG).read_text(encoding="utf-8"))
     for slave in config["slaves"]:
         config["slaves"][slave]["backend"] = "dummy"
     return config
@@ -66,7 +66,7 @@ class CoupledWorkflowTest(unittest.TestCase):
 
         request = json.loads(requests[-1].read_text(encoding="utf-8"))
         sources = request["sources"]
-        self.assertEqual(set(sources["simulated_slaves"]), {"model_n", "model_hdn"})
+        self.assertEqual(set(sources["simulated_slaves"]), {"model_a", "model_b"})
         self.assertEqual(set(sources["prescribed_profiles"]), {"external_satellite"})
         self.assertEqual(sources["prescribed_profiles"]["external_satellite"]["keyword"], "GSATPROD")
 
@@ -86,9 +86,9 @@ class CoupledWorkflowTest(unittest.TestCase):
 
     def test_network_totals_include_prescribed_and_simulated_rates(self) -> None:
         self.assertEqual(self.completed.returncode, 0, self.completed.stderr)
-        request_path = sorted(
+        request_path = max(
             (self.runpath / "coupling" / "exchange").glob("network_request_iteration_*.json")
-        )[-1]
+        )
         request = json.loads(request_path.read_text(encoding="utf-8"))
 
         for total in request["totals_by_year"]:
@@ -100,8 +100,8 @@ class CoupledWorkflowTest(unittest.TestCase):
     def test_master_returns_network_constraints_to_both_slaves(self) -> None:
         self.assertEqual(self.completed.returncode, 0, self.completed.stderr)
         for model, expected_wells in {
-            "model_n": {"N-P1", "N-P2"},
-            "model_hdn": {"H-P1", "H-P2"},
+            "model_a": {"A-P1", "A-P2"},
+            "model_b": {"B-P1", "B-P2"},
         }.items():
             rows = read_csv(self.runpath / "coupling" / f"network_constraints_{model}.csv")
             self.assertEqual({row["well"] for row in rows}, expected_wells)
@@ -110,15 +110,15 @@ class CoupledWorkflowTest(unittest.TestCase):
 
     def test_shared_network_pressure_uses_total_rate_including_profiles(self) -> None:
         self.assertEqual(self.completed.returncode, 0, self.completed.stderr)
-        request_path = sorted(
+        request_path = max(
             (self.runpath / "coupling" / "exchange").glob("network_request_iteration_*.json")
-        )[-1]
+        )
         request = json.loads(request_path.read_text(encoding="utf-8"))
         totals = {row["year"]: row for row in request["totals_by_year"]}
         network = json.loads(
             (ROOT / "input" / "master_network" / "simspec.json").read_text(encoding="utf-8")
         )["network"]
-        constraints = read_csv(self.runpath / "coupling" / "network_constraints_model_n.csv")
+        constraints = read_csv(self.runpath / "coupling" / "network_constraints_model_a.csv")
 
         for row in constraints:
             total_rate = totals[int(row["year"])]["network_q_liq_sm3d"]
@@ -133,8 +133,8 @@ class CoupledWorkflowTest(unittest.TestCase):
         self.assertEqual(self.completed.returncode, 0, self.completed.stderr)
         report = (self.runpath / "COUPLED_REPORT.txt").read_text(encoding="utf-8")
         self.assertIn("prescribed profiles : external_satellite (GSATPROD)", report)
-        self.assertIn("model_n (coupled slave)", report)
-        self.assertIn("model_hdn (coupled slave)", report)
+        self.assertIn("model_a (coupled slave)", report)
+        self.assertIn("model_b (coupled slave)", report)
 
 
 class FailureHandlingTest(unittest.TestCase):
