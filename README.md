@@ -1,5 +1,11 @@
 # Realization-paired two-way reservoir/network coupling with ERT
 
+> [!WARNING]
+> This is an experimental research prototype, not a production-ready or
+> field-ready coupling implementation. Real Flow/ERT execution is verified, but
+> known scientific and standalone-workflow limitations remain. See
+> [`docs/REPOSITORY_REVIEW.md`](docs/REPOSITORY_REVIEW.md) before reuse.
+
 This repository demonstrates a licence-free, executable coupling of three real
 OPM Flow simulations inside each ERT realization:
 
