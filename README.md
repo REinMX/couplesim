@@ -41,11 +41,11 @@ ERT realization N
                                          |
                           BHP constraints for A and B
                                          |
-                              relax and repeat current
-                              report-step calculation
+                              relax and rerun complete
+                              configured restart chains
                                          |
-                              accept converged restart
-                              and advance report period
+                              converge full-horizon rate
+                              and pressure vectors
 ```
 
 The ERT runpath is the isolation boundary. Model A realization `N` and Model B
@@ -69,7 +69,7 @@ The active workflow is:
 Model A_N rates + Model B_N rates
               -> shared network solve
               -> pressure constraints to A_N and B_N
-              -> repeat report step until converged
+              -> rerun the configured horizon until converged
 ```
 
 `GSATPROD` is retained only in
@@ -210,9 +210,11 @@ constraints for Model A and Model B.
 
 ## Important semantic boundary
 
-This implementation is report-step fixed-point co-simulation using Flow restart
-chains. It is not in-memory synchronization at each nonlinear simulator
-ministep.
+This implementation is full-horizon fixed-point/waveform-relaxation
+co-simulation using Flow restart chains. Every outer iteration reruns the
+complete configured horizon; it does not accept one converged report step and
+then advance. It is also not in-memory synchronization at each nonlinear
+simulator ministep.
 
 Native `standalones2rc`/Flow reservoir coupling remains the stronger reference
 for simulator-synchronized exchange. A two-slave native topology was generated
@@ -255,7 +257,7 @@ reservoirs, but Model A is no longer literally the native RC master deck.
 
 Final validation result for this coupling change:
 
-- complete unit/integration suite: 101 tests passed, one expected skip;
+- tracked-tree unit/integration suite: 93 tests passed, one expected skip;
 - scoped Ruff: `All checks passed!`;
 - `git diff --check`: passed;
 - `ert lint`: `Found no errors`;
@@ -294,6 +296,10 @@ separate lint debt is intentionally included in the task.
 The detailed Spanish guide is:
 
 `docs/GUIA_IMPLEMENTACION_ACOPLAMIENTO_BIDIRECCIONAL.md`
+
+The hypothetical Drogon-style/field-model migration guide is:
+
+`docs/DROGON_STYLE_INTEGRATION_GUIDE.md`
 
 It explicitly supersedes the earlier guide that documented the sequential
 `Model B -> GSATPROD -> Model A` workflow.

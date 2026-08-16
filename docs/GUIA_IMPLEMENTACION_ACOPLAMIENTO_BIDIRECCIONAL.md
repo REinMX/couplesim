@@ -2,6 +2,14 @@
 
 Estado: implementación ejecutada y validada con OPM Flow 2026.04 y ERT 23.0.1.
 
+> **Nota de precisión:** el código actual ejecuta un punto fijo de horizonte
+> completo: en cada iteración exterior vuelve a correr las cadenas restart
+> 2024-2026 completas. No converge y acepta un periodo antes de avanzar al
+> siguiente. Las referencias antiguas a «periodo por periodo» deben leerse como
+> intercambio de vectores en fechas de reporte. Para una migración hipotética
+> tipo Drogon, consulte
+> [`DROGON_STYLE_INTEGRATION_GUIDE.md`](DROGON_STYLE_INTEGRATION_GUIDE.md).
+
 Esta guía sustituye expresamente la guía anterior enviada por Telegram en los
 mensajes `1462` y `1463`. La guía anterior describía un flujo secuencial y
 unidireccional basado en `GSATPROD`; no representa la arquitectura activa.
@@ -23,7 +31,8 @@ Requisitos implementados:
 - `GSATPROD` se elimina de la ruta primaria.
 - El network devuelve contrapresión a los dos modelos.
 - Model A, Model B y el network se resuelven con OPM Flow real.
-- La interacción avanza por periodos de reporte usando restart.
+- La interacción intercambia resultados en fechas de reporte usando cadenas
+  restart y converge el horizonte configurado completo.
 
 ## 2. Arquitectura activa
 
@@ -44,9 +53,9 @@ ERT realización N
                                      |
                       BHP para Model A y Model B
                                      |
-                          relajar, repetir y converger
-                                     |
-                          aceptar restart y avanzar
+                          relajar y repetir horizonte
+                                      |
+                          converger vectores completos
 ```
 
 El runpath ERT es la frontera de aislamiento:
@@ -77,7 +86,7 @@ Diseño corregido:
 rates A_N + rates B_N
   -> solve NETWORK
   -> BHP constraints A_N + B_N
-  -> rerun current report step
+  -> rerun complete configured horizon
   -> repeat until convergence
 ```
 
@@ -91,10 +100,10 @@ Ese archivo existe para regresión histórica y comparación. No es el default.
 
 ## 4. Algoritmo paso a paso
 
-Para cada realización y periodo de reporte:
+Para cada realización, en cada iteración exterior sobre el horizonte:
 
 1. Model A y Model B reciben las restricciones BHP actuales.
-2. Cada modelo ejecuta o continúa su cadena OPM Flow mediante `RESTART`.
+2. Cada modelo ejecuta su cadena OPM Flow completa mediante `RESTART`.
 3. Se extraen las tasas brutas de los dos modelos.
 4. Se relajan las tasas que entran al network:
 
@@ -120,7 +129,7 @@ Para cada realización y periodo de reporte:
    ```
 
 8. Si el residual es mayor que `0.005`, se repite el mismo ciclo.
-9. Si converge, se acepta el estado restart y se avanza al siguiente periodo.
+9. Si converge, se acepta el vector de tasas y presiones del horizonte completo.
 10. Si no converge dentro de 20 iteraciones, el forward model falla y ERT no
     acepta silenciosamente una realización parcial.
 
@@ -306,7 +315,7 @@ tests/test_twoway_flow_no_gsatprod.py
 Gates ejecutados:
 
 ```text
-Suite completa: 101 tests OK, 1 skip esperado
+Suite de archivos tracked: 93 tests OK, 1 skip esperado
 Scoped Ruff: All checks passed
 Git diff whitespace gate: OK
 ERT lint: Found no errors
@@ -327,7 +336,7 @@ acoplamiento indicada en el README para no modificar trabajo ajeno.
 
 ## 12. Diferencia frente a standalones2rc
 
-La implementación activa es co-simulación de punto fijo por periodo de reporte.
+La implementación activa es co-simulación de punto fijo de horizonte completo.
 No es comunicación nativa MPI dentro de cada ministep de Flow.
 
 Referencia nativa:
@@ -368,7 +377,8 @@ nativo.
 ## 14. Limitaciones honestas
 
 - Los decks son modelos demostrativos pequeños, no modelos de campo.
-- El intercambio es por periodo de reporte, no por Newton/ministep interno.
+- El intercambio usa fechas de reporte y repite el horizonte completo; no opera
+  por Newton/ministep interno.
 - La incertidumbre de red se mantiene nominal.
 - El runtime nativo S2RC continúa bloqueado por MPI dynamic spawn en este host.
 - Los PRT deben evaluarse con un gate fail-closed que exija el bloque final
@@ -381,4 +391,4 @@ nativo.
 La corrección solicitada está implementada: los dos ensembles se acoplan
 realización por realización, Model B participa como simulación Flow real,
 `GSATPROD` se retiró de la ruta primaria y la contrapresión del network vuelve a
-los dos reservorios durante la iteración de cada periodo de reporte.
+los dos reservorios durante la iteración del horizonte configurado.
